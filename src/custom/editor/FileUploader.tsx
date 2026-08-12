@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type {ChangeEvent} from 'react';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import mammoth from 'mammoth';
 
 interface FileUploaderProps {
   onTextLoad?: (text: string) => void;
@@ -10,7 +11,7 @@ export default function FileUploader({ onTextLoad }: FileUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const selectedFile = e.target.files?.[0] ?? null;
     setFile(selectedFile);
     setError(null);
@@ -19,15 +20,30 @@ export default function FileUploader({ onTextLoad }: FileUploaderProps) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
-      onTextLoad?.(text);
-    };
-    reader.onerror = () => {
-      setError('Unable to read the selected file.');
-    };
-    reader.readAsText(selectedFile);
+    try{
+        if(selectedFile.name.toLowerCase().endsWith('.docx')){
+            const arrayBuffer = await selectedFile.arrayBuffer();
+            const result = await mammoth.extractRawText({
+                arrayBuffer,
+            });
+            onTextLoad?.(result.value);
+        }else{
+            const reader = new FileReader();
+            reader.onload = () => {
+                const text = typeof reader.result === 'string' ? reader.result : '';
+                onTextLoad?.(text);
+            };
+            reader.onerror = () => {
+                setError('Unable to read the selected file.');
+            };
+            reader.readAsText(selectedFile);
+        }
+    }catch(err){
+        console.error(err);
+        setError('Unable to read the selected File');
+    }
+
+    
   }
 
   return (
@@ -47,7 +63,7 @@ export default function FileUploader({ onTextLoad }: FileUploaderProps) {
         Upload File
         <input
           type="file"
-          accept=".txt,.md,.json,.js,.ts,.tsx"
+          accept=".txt,.md,.json,.js,.ts,.tsx,.docx"
           onChange={handleFileChange}
           style={{
             position: 'absolute',
