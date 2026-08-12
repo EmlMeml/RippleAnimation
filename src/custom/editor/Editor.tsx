@@ -113,23 +113,26 @@ export default function RichTextEditor() {
 
   return (
     <div className="editor-container">
-      <Slate
-        editor={editor}
-        initialValue={initialValue}
-        onChange={(newValue) => {
-            setValue(newValue);
-            }  
-        }
-      >
+        
+        <Slate
+            editor={editor}
+            initialValue={initialValue}
+            onChange={(newValue) => {
+                setValue(newValue);
+                }  
+            }
+        >
         <Toolbar onTextLoad={handleFileLoad}/>
-
-        <Editable
-          className="editor"
-          placeholder="Text eingeben ..."
-          renderElement={renderElement}
-          renderLeaf={renderLeaf}
-          spellCheck
-        />
+        <div className="editor-scroll-container">
+            <Editable
+            className="editor"
+            placeholder="Text eingeben ..."
+            renderElement={renderElement}
+            renderLeaf={renderLeaf}
+            spellCheck
+            />  
+        </div>
+        
       </Slate>
     </div>
   );
