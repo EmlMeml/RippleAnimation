@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   createEditor,
   type Descendant,
@@ -71,28 +71,100 @@ export default function RichTextEditor() {
     []
   );
 
-  const [value, setValue] = useState<Descendant[]>(initialValue);
+  const [,setValue] = useState<Descendant[]>(initialValue);
 
-  function handleFileLoad(text: string) {
-    const paragraphs: ParagraphElement[] = text
-    .split(/\r?\n/)
-    .map((line) => ({
-      type: "paragraph",
-      children: [{ text: line }],
-    }));
+  function deserialize(
+    node: Node,
+    marks: Partial<CustomText> = {}
+    ): Descendant[] {
+    if (node.nodeType === Node.TEXT_NODE) {
+        return [
+        {
+            text: node.textContent ?? "",
+            ...marks,
+        },
+        ];
+    }
 
-    // Falls die Datei leer ist
-    if (paragraphs.length === 0) {
-        paragraphs.push({
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+        return [];
+    }
+
+    const element = node as HTMLElement;
+
+    let currentMarks = { ...marks };
+
+    if (element.tagName === "STRONG" || element.tagName === "B") {
+        currentMarks.bold = true;
+    }
+
+    if (element.tagName === "EM" || element.tagName === "I") {
+        currentMarks.italic = true;
+    }
+
+    if (element.tagName === "U") {
+        currentMarks.underline = true;
+    }
+    
+    const children = Array.from(element.childNodes)
+    .flatMap((child) =>
+      deserialize(child, currentMarks)
+    );
+
+    const textChildren: CustomText[] = children.filter(
+    (child): child is CustomText =>
+      "text" in child
+    );
+
+    switch (element.tagName) {
+        case "H1":
+        return [
+            {
+            type: "heading-one",
+            children:
+                textChildren.length > 0
+                ? textChildren
+                : [{ text: "" }],
+            },
+        ];
+
+        case "P":
+        return [
+            {
+            type: "paragraph",
+            children:
+                textChildren.length > 0
+                ? textChildren
+                : [{ text: "" }],
+            },
+        ];
+
+        default:
+        return children;
+    }
+}
+
+  function htmlToSlate(html: string): Descendant[] {
+    const parser = new DOMParser();
+    const document = parser.parseFromString(html, "text/html");
+
+    return Array.from(document.body.childNodes)
+        .map((node) => deserialize(node))
+        .flat();
+    }
+
+   function handleHtmlLoad(html: string) {
+    const nodes = htmlToSlate(html);
+
+    if (nodes.length === 0) {
+        nodes.push({
         type: "paragraph",
         children: [{ text: "" }],
         });
     }
 
-    // Slate-Inhalt direkt ersetzen
-    editor.children = paragraphs;
+    editor.children = nodes;
 
-    // Cursor an den Anfang des neuen Dokuments setzen
     editor.selection = {
         anchor: {
         path: [0, 0],
@@ -104,11 +176,35 @@ export default function RichTextEditor() {
         },
     };
 
-    // Slate über die Änderung informieren
     editor.onChange();
 
-    // React-State synchron halten
-    setValue(paragraphs);
+    setValue(nodes);
+    }
+
+  function handleFileLoad(text: string) {
+  const paragraphs: ParagraphElement[] = text
+    .split(/\r?\n/)
+    .map((line) => ({
+      type: "paragraph",
+      children: [{ text: line }],
+    }));
+
+  editor.children = paragraphs;
+
+  editor.selection = {
+    anchor: {
+      path: [0, 0],
+      offset: 0,
+    },
+    focus: {
+      path: [0, 0],
+      offset: 0,
+    },
+  };
+
+  editor.onChange();
+
+  setValue(paragraphs);
 }
 
   return (
@@ -122,7 +218,7 @@ export default function RichTextEditor() {
                 }  
             }
         >
-        <Toolbar onTextLoad={handleFileLoad}/>
+        <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad}/>
         <div className="editor-scroll-container">
             <Editable
             className="editor"
@@ -144,8 +240,10 @@ export default function RichTextEditor() {
 
 function Toolbar({
     onTextLoad,
+    onHtmlLoad
 }:{
     onTextLoad: (text:string) => void;
+    onHtmlLoad: (text:string) => void;
 }) {
   return (
     <div className="toolbar">
@@ -160,7 +258,7 @@ function Toolbar({
         p
       </BlockButton>
       <LinkButton />
-      <FileUploader onTextLoad={onTextLoad}></FileUploader>
+      <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
     </div>
   );
 }
