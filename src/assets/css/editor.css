@@ -1,9 +1,11 @@
 .editor-container {
   width: 80%;
-  height: 560px;
+  height:720px;
   margin: 40px auto;
   border: 1px solid #ddd;
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -13,6 +15,7 @@
   padding: 8px;
   border-bottom: 1px solid #ddd;
   background: #f7f7f7;
+  flex-shrink: 0;
 }
 
 .toolbar button {
@@ -35,4 +38,10 @@
 
 .editor p {
   margin: 0 0 1em;
+}
+
+.editor-scroll-container{
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
