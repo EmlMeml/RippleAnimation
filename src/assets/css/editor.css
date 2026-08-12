@@ -1,0 +1,38 @@
+.editor-container {
+  width: 80%;
+  height: 560px;
+  margin: 40px auto;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  background: #f7f7f7;
+}
+
+.toolbar button {
+  padding: 5px 10px;
+  border: 1px solid #000000;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+}
+
+.editor {
+  min-height: 300px;
+  padding: 20px;
+  outline: none;
+}
+
+.editor h1 {
+  font-size: 2rem;
+}
+
+.editor p {
+  margin: 0 0 1em;
+}
