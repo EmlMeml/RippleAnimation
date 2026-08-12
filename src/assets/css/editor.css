@@ -45,3 +45,8 @@
   min-height: 0;
   overflow-y: auto;
 }
+
+.analysis-panel{
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
