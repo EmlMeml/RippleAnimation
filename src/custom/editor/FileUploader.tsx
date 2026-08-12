@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type {ChangeEvent} from 'react';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import mammoth from 'mammoth';
 
 interface FileUploaderProps {
   onTextLoad?: (text: string) => void;
+  onHtmlLoad?: (html: string) => void;
 }
 
-export default function FileUploader({ onTextLoad }: FileUploaderProps) {
-  const [file, setFile] = useState<File | null>(null);
+export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProps) {
+  const [, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // handle File Type: txt or Docx
   async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const selectedFile = e.target.files?.[0] ?? null;
     setFile(selectedFile);
@@ -23,10 +25,10 @@ export default function FileUploader({ onTextLoad }: FileUploaderProps) {
     try{
         if(selectedFile.name.toLowerCase().endsWith('.docx')){
             const arrayBuffer = await selectedFile.arrayBuffer();
-            const result = await mammoth.extractRawText({
+            const result = await mammoth.convertToHtml({
                 arrayBuffer,
             });
-            onTextLoad?.(result.value);
+            onHtmlLoad?.(result.value);
         }else{
             const reader = new FileReader();
             reader.onload = () => {
