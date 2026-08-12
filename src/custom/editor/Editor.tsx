@@ -73,13 +73,55 @@ export default function RichTextEditor() {
 
   const [value, setValue] = useState<Descendant[]>(initialValue);
 
+  function handleFileLoad(text: string) {
+    const paragraphs: ParagraphElement[] = text
+    .split(/\r?\n/)
+    .map((line) => ({
+      type: "paragraph",
+      children: [{ text: line }],
+    }));
+
+    // Falls die Datei leer ist
+    if (paragraphs.length === 0) {
+        paragraphs.push({
+        type: "paragraph",
+        children: [{ text: "" }],
+        });
+    }
+
+    // Slate-Inhalt direkt ersetzen
+    editor.children = paragraphs;
+
+    // Cursor an den Anfang des neuen Dokuments setzen
+    editor.selection = {
+        anchor: {
+        path: [0, 0],
+        offset: 0,
+        },
+        focus: {
+        path: [0, 0],
+        offset: 0,
+        },
+    };
+
+    // Slate über die Änderung informieren
+    editor.onChange();
+
+    // React-State synchron halten
+    setValue(paragraphs);
+}
+
   return (
     <div className="editor-container">
       <Slate
         editor={editor}
         initialValue={initialValue}
+        onChange={(newValue) => {
+            setValue(newValue);
+            }  
+        }
       >
-        <Toolbar />
+        <Toolbar onTextLoad={handleFileLoad}/>
 
         <Editable
           className="editor"
@@ -97,7 +139,11 @@ export default function RichTextEditor() {
    Toolbar
 ----------------------------- */
 
-function Toolbar() {
+function Toolbar({
+    onTextLoad,
+}:{
+    onTextLoad: (text:string) => void;
+}) {
   return (
     <div className="toolbar">
       <MarkButton format="bold">B</MarkButton>
@@ -111,7 +157,7 @@ function Toolbar() {
         p
       </BlockButton>
       <LinkButton />
-      <FileUploader></FileUploader>
+      <FileUploader onTextLoad={onTextLoad}></FileUploader>
     </div>
   );
 }
