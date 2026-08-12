@@ -15,6 +15,9 @@ import {
 import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
+import { extractFacts } from "./../../ai/api";
+import type { FactExtraction } from "./../../types/facts";
+import { getEditorText } from "./getEditorText";
 
 type CustomText = {
   text: string;
@@ -71,7 +74,14 @@ export default function RichTextEditor() {
     []
   );
 
-  const [,setValue] = useState<Descendant[]>(initialValue);
+  const [, setValue] = useState<Descendant[]>(initialValue);
+
+  const [analysis, setAnalysis] =
+    useState<FactExtraction | null>(null);
+
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const [analysisError, setAnalysisError] = useState("");
 
   function deserialize(
     node: Node,
@@ -207,9 +217,42 @@ export default function RichTextEditor() {
   setValue(paragraphs);
 }
 
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    setAnalysisError("");
+
+    try {
+      const text = getEditorText(editor.children);
+
+      if (!text.trim()) {
+        setAnalysisError("Der Editor ist leer.");
+        return;
+      }
+
+      console.log("Text sent to AI:");
+      console.log(text);
+
+      const result = await extractFacts(text);
+
+      console.log("AI result:");
+      console.log(result);
+
+      setAnalysis(result);
+    } catch (error) {
+      console.error(error);
+
+      setAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "Unbekannter Fehler"
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   return (
     <div className="editor-container">
-        
         <Slate
             editor={editor}
             initialValue={initialValue}
@@ -218,7 +261,7 @@ export default function RichTextEditor() {
                 }  
             }
         >
-        <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad}/>
+        <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
         <div className="editor-scroll-container">
             <Editable
             className="editor"
@@ -230,7 +273,26 @@ export default function RichTextEditor() {
         </div>
         
       </Slate>
+
+       {analysis && (
+        <div className="analysis-panel">
+          <h2>Extrahierte Fakten</h2>
+
+          {analysis.facts.map((fact, index) => (
+            <div key={index}>
+              <strong>{fact.subject}</strong>
+              {" → "}
+              <strong>{fact.predicate}</strong>
+              {" → "}
+              {fact.value !== undefined
+                ? String(fact.value)
+                : fact.object}
+            </div>
+          ))}
+        </div>
+      )} 
     </div>
+      
   );
 }
 
@@ -240,10 +302,14 @@ export default function RichTextEditor() {
 
 function Toolbar({
     onTextLoad,
-    onHtmlLoad
+    onHtmlLoad,
+    onAnalyze,
+    analyzing
 }:{
     onTextLoad: (text:string) => void;
     onHtmlLoad: (text:string) => void;
+    onAnalyze: () => void;
+    analyzing: boolean;
 }) {
   return (
     <div className="toolbar">
@@ -259,6 +325,16 @@ function Toolbar({
       </BlockButton>
       <LinkButton />
       <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
+      <button
+      type="button"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onAnalyze();
+      }}
+      disabled={analyzing}
+      >
+        {analyzing ? "Analysiere..." : "Text analysieren"}
+      </button>
     </div>
   );
 }
