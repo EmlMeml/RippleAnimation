@@ -18,6 +18,10 @@ import './../../assets/css/editor.css';
 import { extractFacts } from "./../../ai/api";
 import type { FactExtraction } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
+import {
+  checkConsistency,
+  type Inconsistency,
+} from './../../ai/consistencyChecker';
 
 type CustomText = {
   text: string;
@@ -74,6 +78,8 @@ export default function RichTextEditor() {
     []
   );
 
+  const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
+
   const [, setValue] = useState<Descendant[]>(initialValue);
 
   const [analysis, setAnalysis] =
@@ -81,7 +87,7 @@ export default function RichTextEditor() {
 
   const [analyzing, setAnalyzing] = useState(false);
 
-  const [analysisError, setAnalysisError] = useState("");
+  const [, setAnalysisError] = useState("");
 
   function deserialize(
     node: Node,
@@ -222,6 +228,28 @@ export default function RichTextEditor() {
     setAnalysisError("");
 
     try {
+
+      //fixes current Editor Bug: Cant edit after analysis
+      if (
+          editor.children.length === 0 ||
+          !editor.children[0] ||
+          !SlateElement.isElement(editor.children[0])
+        ) {
+          editor.children = [
+            {
+              type: "paragraph",
+              children: [{ text: "" }],
+            },
+          ];
+
+          editor.selection = {
+            anchor: { path: [0, 0], offset: 0 },
+            focus: { path: [0, 0], offset: 0 },
+          };
+
+          editor.onChange();
+        }
+
       const text = getEditorText(editor.children);
 
       if (!text.trim()) {
@@ -229,15 +257,19 @@ export default function RichTextEditor() {
         return;
       }
 
-      console.log("Text sent to AI:");
-      console.log(text);
 
       const result = await extractFacts(text);
 
       console.log("AI result:");
       console.log(result);
-
+      
       setAnalysis(result);
+
+
+      const foundInconsistencies = checkConsistency(result);
+      console.log("Inconsistencies: ", foundInconsistencies);
+      setInconsistencies(foundInconsistencies);
+
     } catch (error) {
       console.error(error);
 
@@ -273,9 +305,12 @@ export default function RichTextEditor() {
         </div>
         
       </Slate>
-
+          
        {analysis && (
-        <div className="analysis-panel">
+        <div className="analysis-panel" style={{
+          maxHeight: "400px",
+          overflowY: "auto",
+        }}>
           <h2>Extrahierte Fakten</h2>
 
           {analysis.facts.map((fact, index) => (
@@ -290,7 +325,35 @@ export default function RichTextEditor() {
             </div>
           ))}
         </div>
+      )}
+      {
+      inconsistencies.length > 0 && (
+        <div className="analysis-inconsistencies">
+          <h2>Inkonsistenzen</h2>
+
+          {inconsistencies.map((inconsistency, index) => (
+            <div key={index}>
+              <p>
+                <strong>{inconsistency.message}</strong>
+              </p>
+
+              <pre>
+                {JSON.stringify(
+                  inconsistency.facts,
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+          ))}
+        </div>
       )} 
+      {analysis && inconsistencies.length === 0 && (
+        
+        <div>
+          <h2>Keine Inkonsistenzen gefunden</h2>
+        </div>
+      )}
     </div>
       
   );
