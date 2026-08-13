@@ -22,7 +22,6 @@ import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
-import { ParaglidingRounded } from "@mui/icons-material";
 
 type CustomText = {
   text: string;
