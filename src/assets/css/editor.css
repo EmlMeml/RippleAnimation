@@ -1,20 +1,22 @@
 .editor-container {
   width: 80%;
-  height:720px;
+  max-height: 720px;
+  min-height: 720px;
   margin: 40px auto;
-  border: 1px solid #ddd;
+  border: 2px solid #b7c396;
+  background-color: #fefefe;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .toolbar {
   display: flex;
   gap: 6px;
   padding: 8px;
-  border-bottom: 1px solid #ddd;
-  background: #f7f7f7;
+  border-bottom: 1px solid #b7c396;
+  background: #b7c396;
   flex-shrink: 0;
 }
 
@@ -22,7 +24,7 @@
   padding: 5px 10px;
   border: 1px solid #000000;
   border-radius: 4px;
-  background: white;
+  background: #ba9a91;
   cursor: pointer;
 }
 
@@ -47,6 +49,6 @@
 }
 
 .analysis-panel{
-  border: 1px solid #ddd;
+  border: 1px solid #b7c396;
   border-radius: 8px;
 }

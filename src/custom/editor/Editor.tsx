@@ -253,7 +253,7 @@ export default function RichTextEditor() {
             } */
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
-        <div className="editor-scroll-container" style={{minHeight:"500px"}}>
+        <div className="editor-scroll-container" style={{minHeight:"200px"}}>
             <Editable
             className="editor"
             placeholder="Text eingeben ..."
@@ -273,7 +273,8 @@ export default function RichTextEditor() {
           
        {analysis && (
         <div className="analysis-panel" style={{
-          minHeight: "400px",
+          minHeight: "200px",
+          maxHeight: "200px",
           overflowY: "auto",
         }}>
           <h2>Extrahierte Fakten</h2>
@@ -293,7 +294,7 @@ export default function RichTextEditor() {
       )}
       {
       inconsistencies.length > 0 && (
-        <div className="analysis-inconsistencies">
+        <div className="analysis-inconsistencies" style={{minHeight: '100px',maxHeight:'100px', overflowY:'auto'}}>
           <h2>Inkonsistenzen</h2>
 
           {inconsistencies.map((inconsistency, index) => (
@@ -355,6 +356,7 @@ function Toolbar({
       <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
       <button
       type="button"
+      style={{color:'#000'}}
       onMouseDown={(event) => {
         event.preventDefault();
         onAnalyze();
