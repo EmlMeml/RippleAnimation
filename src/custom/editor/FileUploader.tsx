@@ -53,15 +53,22 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
       <label
         style={{
           cursor: 'pointer',
-          padding: '4px 8px',
+          height:'38px',
+          paddingRight:'12px',
+          paddingLeft:'8px',
           display: 'inline-flex',
           alignItems: 'center',
           gap: '8px',
           position: 'relative',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          color: '#000000',
+          border: '1px solid #000000',
+          borderRadius:'4px',
+          background:'#ba9a91',
+          fontSize:'14px'
         }}
       >
-        <UploadFileIcon style={{ color: '#263a4a' }} />
+        <UploadFileIcon style={{ color: '#000000' }} />
         Upload File
         <input
           type="file"
@@ -77,7 +84,8 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
             cursor: 'pointer',
             border: 0,
             padding: 0,
-            margin: 0
+            margin: 0,
+            color: '#666e5b',
           }}
         />
       </label>

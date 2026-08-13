@@ -22,6 +22,7 @@ import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
+import { ParaglidingRounded } from "@mui/icons-material";
 
 type CustomText = {
   text: string;
@@ -80,14 +81,25 @@ export default function RichTextEditor() {
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
 
-  const [, setValue] = useState<Descendant[]>(initialValue);
-
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
 
   const [, setAnalysisError] = useState("");
+
+  function replaceEditorContent(nodes: Descendant[]) {
+    Editor.withoutNormalizing(editor, () => {
+      editor.children = nodes;
+
+      editor.selection = {
+        anchor: { path: [0, 0], offset: 0 },
+        focus: { path: [0, 0], offset: 0 },
+      };
+    });
+
+    editor.onChange();
+}
 
   function deserialize(
     node: Node,
@@ -178,96 +190,43 @@ export default function RichTextEditor() {
         children: [{ text: "" }],
         });
     }
-
-    editor.children = nodes;
-
-    editor.selection = {
-        anchor: {
-        path: [0, 0],
-        offset: 0,
-        },
-        focus: {
-        path: [0, 0],
-        offset: 0,
-        },
-    };
-
-    editor.onChange();
-
-    setValue(nodes);
+    replaceEditorContent(nodes);
+    
     }
 
   function handleFileLoad(text: string) {
-  const paragraphs: ParagraphElement[] = text
-    .split(/\r?\n/)
-    .map((line) => ({
-      type: "paragraph",
-      children: [{ text: line }],
-    }));
+    const paragraphs: ParagraphElement[] = text
+      .split(/\r?\n/)
+      .map((line) => ({
+        type: "paragraph",
+        children: [{ text: line }],
+      }));
 
-  editor.children = paragraphs;
-
-  editor.selection = {
-    anchor: {
-      path: [0, 0],
-      offset: 0,
-    },
-    focus: {
-      path: [0, 0],
-      offset: 0,
-    },
-  };
-
-  editor.onChange();
-
-  setValue(paragraphs);
-}
+    replaceEditorContent(paragraphs);
+    console.log("AFTER FILE LOAD", {
+      children: editor.children,
+      selection: editor.selection,
+    });
+  }
 
   async function handleAnalyze() {
     setAnalyzing(true);
     setAnalysisError("");
 
     try {
-
-      //fixes current Editor Bug: Cant edit after analysis
-      if (
-          editor.children.length === 0 ||
-          !editor.children[0] ||
-          !SlateElement.isElement(editor.children[0])
-        ) {
-          editor.children = [
-            {
-              type: "paragraph",
-              children: [{ text: "" }],
-            },
-          ];
-
-          editor.selection = {
-            anchor: { path: [0, 0], offset: 0 },
-            focus: { path: [0, 0], offset: 0 },
-          };
-
-          editor.onChange();
-        }
-
       const text = getEditorText(editor.children);
 
       if (!text.trim()) {
         setAnalysisError("Der Editor ist leer.");
         return;
       }
-
-
       const result = await extractFacts(text);
 
-      console.log("AI result:");
-      console.log(result);
-      
       setAnalysis(result);
 
+      const foundInconsistencies =
+        checkConsistency(result);
 
-      const foundInconsistencies = checkConsistency(result);
-      console.log("Inconsistencies: ", foundInconsistencies);
       setInconsistencies(foundInconsistencies);
 
     } catch (error) {
@@ -288,19 +247,25 @@ export default function RichTextEditor() {
         <Slate
             editor={editor}
             initialValue={initialValue}
-            onChange={(newValue) => {
+            /* onChange={(newValue) => {
                 setValue(newValue);
                 }  
-            }
+            } */
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
-        <div className="editor-scroll-container">
+        <div className="editor-scroll-container" style={{minHeight:"200px"}}>
             <Editable
             className="editor"
             placeholder="Text eingeben ..."
             renderElement={renderElement}
             renderLeaf={renderLeaf}
             spellCheck
+            onChange={() => {
+              console.log(
+                "SLATE ONCHANGE:",
+                getEditorText(editor.children)
+              );
+            }}
             />  
         </div>
         
@@ -308,7 +273,8 @@ export default function RichTextEditor() {
           
        {analysis && (
         <div className="analysis-panel" style={{
-          maxHeight: "400px",
+          minHeight: "200px",
+          maxHeight: "200px",
           overflowY: "auto",
         }}>
           <h2>Extrahierte Fakten</h2>
@@ -328,7 +294,7 @@ export default function RichTextEditor() {
       )}
       {
       inconsistencies.length > 0 && (
-        <div className="analysis-inconsistencies">
+        <div className="analysis-inconsistencies" style={{minHeight: '100px',maxHeight:'100px', overflowY:'auto'}}>
           <h2>Inkonsistenzen</h2>
 
           {inconsistencies.map((inconsistency, index) => (
@@ -390,6 +356,7 @@ function Toolbar({
       <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
       <button
       type="button"
+      style={{color:'#000'}}
       onMouseDown={(event) => {
         event.preventDefault();
         onAnalyze();
