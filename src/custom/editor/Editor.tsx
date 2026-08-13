@@ -30,19 +30,19 @@ type CustomText = {
   underline?: boolean;
 };
 
+type LinkElement = {
+  type: "link";
+  url: string;
+  children: CustomText[];
+};
+
 type ParagraphElement = {
   type: "paragraph";
-  children: CustomText[];
+  children: Array<CustomText | LinkElement>;
 };
 
 type HeadingElement = {
   type: "heading-one";
-  children: CustomText[];
-};
-
-type LinkElement = {
-  type: "link";
-  url: string;
   children: CustomText[];
 };
 
@@ -73,10 +73,21 @@ const initialValue: Descendant[] = [
 ];
 
 export default function RichTextEditor() {
-  const editor = useMemo(
-    () => withHistory(withReact(createEditor())),
-    []
+  const editor = useMemo(() => {
+    const e = withHistory(
+    withReact(createEditor())
   );
+
+  const { isInline } = e;
+
+  e.isInline = (element) => {
+    return element.type === "link"
+      ? true
+      : isInline(element);
+  };
+
+  return e;
+  }, []);
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
 
@@ -100,87 +111,166 @@ export default function RichTextEditor() {
     editor.onChange();
 }
 
-  function deserialize(
-    node: Node,
-    marks: Partial<CustomText> = {}
-    ): Descendant[] {
+function deserialize(
+  node: Node,
+  marks: Partial<CustomText> = {}
+): Descendant[] {
+    // Text
     if (node.nodeType === Node.TEXT_NODE) {
-        return [
+      const text = node.textContent ?? "";
+
+      if (!text) {
+        return [];
+      }
+
+      return [
         {
-            text: node.textContent ?? "",
-            ...marks,
+          text,
+          ...marks,
         },
-        ];
+      ];
     }
 
+    // Kein HTML-Element
     if (node.nodeType !== Node.ELEMENT_NODE) {
-        return [];
+      return [];
     }
 
     const element = node as HTMLElement;
 
-    let currentMarks = { ...marks };
+    // Marks übernehmen
+    const currentMarks: Partial<CustomText> = {
+      ...marks,
+    };
 
-    if (element.tagName === "STRONG" || element.tagName === "B") {
-        currentMarks.bold = true;
+    if (
+      element.tagName === "STRONG" ||
+      element.tagName === "B"
+    ) {
+      currentMarks.bold = true;
     }
 
-    if (element.tagName === "EM" || element.tagName === "I") {
-        currentMarks.italic = true;
+    if (
+      element.tagName === "EM" ||
+      element.tagName === "I"
+    ) {
+      currentMarks.italic = true;
     }
 
     if (element.tagName === "U") {
-        currentMarks.underline = true;
+      currentMarks.underline = true;
     }
-    
+
+    // --------------------------------
+    // LINK
+    // --------------------------------
+
+    if (element.tagName === "A") {
+      const url = element.getAttribute("href");
+
+      console.log("FOUND LINK:", {
+        url,
+        text: element.textContent,
+        html: element.outerHTML,
+      });
+
+      if (!url) {
+        return Array.from(element.childNodes).flatMap(
+          (child) => deserialize(child, currentMarks)
+        );
+      }
+
+      const linkChildren: CustomText[] =
+        Array.from(element.childNodes)
+          .flatMap((child) =>
+            deserialize(child, currentMarks)
+          )
+          .filter(
+            (child): child is CustomText =>
+              "text" in child
+          );
+
+      console.log("LINK CHILDREN:", linkChildren);
+
+      return [
+        {
+          type: "link",
+          url,
+          children:
+            linkChildren.length > 0
+              ? linkChildren
+              : [{ text: element.textContent ?? "" }],
+        },
+      ];
+    }
+
+    // --------------------------------
+    // Normale Kinder
+    // --------------------------------
+
     const children = Array.from(element.childNodes)
-    .flatMap((child) =>
-      deserialize(child, currentMarks)
-    );
+      .flatMap((child) =>
+        deserialize(child, currentMarks)
+      );
 
-    const textChildren: CustomText[] = children.filter(
-    (child): child is CustomText =>
-      "text" in child
-    );
+    // --------------------------------
+    // H1
+    // --------------------------------
 
-    switch (element.tagName) {
-        case "H1":
-        return [
-            {
-            type: "heading-one",
-            children:
-                textChildren.length > 0
-                ? textChildren
-                : [{ text: "" }],
-            },
-        ];
+    if (element.tagName === "H1") {
+      const textChildren = children.filter(
+        (child): child is CustomText =>
+          "text" in child
+      );
 
-        case "P":
-        return [
-            {
-            type: "paragraph",
-            children:
-                textChildren.length > 0
-                ? textChildren
-                : [{ text: "" }],
-            },
-        ];
-
-        default:
-        return children;
+      return [
+        {
+          type: "heading-one",
+          children:
+            textChildren.length > 0
+              ? textChildren
+              : [{ text: "" }],
+        },
+      ];
     }
-}
+
+    // --------------------------------
+    // P / DIV
+    // --------------------------------
+
+    if (
+      element.tagName === "P" ||
+      element.tagName === "DIV"
+    ) {
+      return [
+        {
+          type: "paragraph",
+          children:
+            children.length > 0
+              ? (children as Array<
+                  CustomText | LinkElement
+                >)
+              : [{ text: "" }],
+        },
+      ];
+    }
+
+    // --------------------------------
+    // Andere Elemente
+    // --------------------------------
+
+    return children;
+  }
 
   function htmlToSlate(html: string): Descendant[] {
     const parser = new DOMParser();
     const document = parser.parseFromString(html, "text/html");
 
     return Array.from(document.body.childNodes)
-        .map((node) => deserialize(node))
-        .flat();
+    .flatMap((node) => deserialize(node));
     }
 
-   function handleHtmlLoad(html: string) {
+  function handleHtmlLoad(html: string) {
     const nodes = htmlToSlate(html);
 
     if (nodes.length === 0) {
@@ -479,7 +569,6 @@ function LinkButton() {
 /* -----------------------------
    Rendering
 ----------------------------- */
-
 function renderElement({
   attributes,
   children,
@@ -496,13 +585,36 @@ function renderElement({
     case "link":
       return (
         <a
-          {...attributes}
-          href={element.url}
-          target="_blank"
-          rel="noreferrer"
-        >
+        {...attributes}
+        href={element.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onMouseDown={(event) => {
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+
+            window.open(
+              element.url,
+              "_blank",
+              "noopener,noreferrer"
+            );
+          }
+        }}
+        style={{
+          color: "blue",
+          textDecoration: "underline",
+          cursor: "pointer",
+        }}
+      >
+        {children}
+      </a>
+      );
+
+    case "paragraph":
+      return (
+        <p {...attributes}>
           {children}
-        </a>
+        </p>
       );
 
     default:

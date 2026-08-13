@@ -23,23 +23,41 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
     }
 
     try{
-        if(selectedFile.name.toLowerCase().endsWith('.docx')){
-            const arrayBuffer = await selectedFile.arrayBuffer();
-            const result = await mammoth.convertToHtml({
-                arrayBuffer,
-            });
-            onHtmlLoad?.(result.value);
-        }else{
-            const reader = new FileReader();
-            reader.onload = () => {
-                const text = typeof reader.result === 'string' ? reader.result : '';
-                onTextLoad?.(text);
-            };
-            reader.onerror = () => {
-                setError('Unable to read the selected file.');
-            };
-            reader.readAsText(selectedFile);
+        const fileName = selectedFile.name.toLowerCase();
+
+        // -----------------------------
+        // DOCX
+        // -----------------------------
+        if (fileName.endsWith(".docx")) {
+          const arrayBuffer = await selectedFile.arrayBuffer();
+
+          const result = await mammoth.convertToHtml({
+            arrayBuffer,
+          });
+
+          onHtmlLoad?.(result.value);
+          return;
         }
+
+        // -----------------------------
+        // HTML
+        // -----------------------------
+        if (
+          fileName.endsWith(".html") ||
+          fileName.endsWith(".htm")
+        ) {
+          const html = await selectedFile.text();
+
+          onHtmlLoad?.(html);
+          return;
+        }
+
+        // -----------------------------
+        // TXT / MD / JSON / JS / TS / TSX
+        // -----------------------------
+        const text = await selectedFile.text();
+
+        onTextLoad?.(text);
     }catch(err){
         console.error(err);
         setError('Unable to read the selected File');
@@ -72,7 +90,7 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
         Upload File
         <input
           type="file"
-          accept=".txt,.md,.json,.js,.ts,.tsx,.docx"
+          accept=".txt,.md,.json,.js,.ts,.tsx,.docx,.html"
           onChange={handleFileChange}
           style={{
             position: 'absolute',
