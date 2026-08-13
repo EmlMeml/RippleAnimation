@@ -81,8 +81,6 @@ export default function RichTextEditor() {
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
 
-  const [, setValue] = useState<Descendant[]>(initialValue);
-
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
 
@@ -91,23 +89,16 @@ export default function RichTextEditor() {
   const [, setAnalysisError] = useState("");
 
   function replaceEditorContent(nodes: Descendant[]) {
-  Editor.withoutNormalizing(editor, () => {
-    // Bestehenden Inhalt entfernen
-    Transforms.removeNodes(editor, {
-      at: [],
-      match: (_, path) => path.length === 1,
+    Editor.withoutNormalizing(editor, () => {
+      editor.children = nodes;
+
+      editor.selection = {
+        anchor: { path: [0, 0], offset: 0 },
+        focus: { path: [0, 0], offset: 0 },
+      };
     });
 
-    // Neuen Inhalt einfügen
-    Transforms.insertNodes(editor, nodes, {
-      at: [0],
-    });
-  });
-
-  Transforms.select(editor, {
-    anchor: { path: [0, 0], offset: 0 },
-    focus: { path: [0, 0], offset: 0 },
-  });
+    editor.onChange();
 }
 
   function deserialize(
@@ -212,72 +203,69 @@ export default function RichTextEditor() {
       }));
 
     replaceEditorContent(paragraphs);
+    console.log("AFTER FILE LOAD", {
+      children: editor.children,
+      selection: editor.selection,
+    });
   }
 
   async function handleAnalyze() {
-  setAnalyzing(true);
-  setAnalysisError("");
+    setAnalyzing(true);
+    setAnalysisError("");
 
-  try {
-    const text = getEditorText(editor.children);
+    try {
+      const text = getEditorText(editor.children);
 
-    if (!text.trim()) {
-      setAnalysisError("Der Editor ist leer.");
-      return;
+      if (!text.trim()) {
+        setAnalysisError("Der Editor ist leer.");
+        return;
+      }
+      const result = await extractFacts(text);
+
+      setAnalysis(result);
+
+      const foundInconsistencies =
+        checkConsistency(result);
+
+      setInconsistencies(foundInconsistencies);
+
+    } catch (error) {
+      console.error(error);
+
+      setAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "Unbekannter Fehler"
+      );
+    } finally {
+      setAnalyzing(false);
     }
-
-    console.log("BEFORE ANALYSIS", {
-      children: editor.children,
-      selection: editor.selection,
-    });
-
-    const result = await extractFacts(text);
-
-    console.log("AI result:", result);
-
-    setAnalysis(result);
-
-    const foundInconsistencies = checkConsistency(result);
-
-    console.log("Inconsistencies:", foundInconsistencies);
-
-    setInconsistencies(foundInconsistencies);
-
-    console.log("AFTER ANALYSIS", {
-      children: editor.children,
-      selection: editor.selection,
-    });
-  } catch (error) {
-    console.error(error);
-
-    setAnalysisError(
-      error instanceof Error
-        ? error.message
-        : "Unbekannter Fehler"
-    );
-  } finally {
-    setAnalyzing(false);
   }
-}
 
   return (
     <div className="editor-container">
         <Slate
             editor={editor}
             initialValue={initialValue}
-            onChange={(newValue) => {
+            /* onChange={(newValue) => {
                 setValue(newValue);
                 }  
-            }
+            } */
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
-        <div className="editor-scroll-container">
+        <div className="editor-scroll-container" style={{minHeight:"500px"}}>
             <Editable
             className="editor"
             placeholder="Text eingeben ..."
             renderElement={renderElement}
             renderLeaf={renderLeaf}
             spellCheck
+            onChange={() => {
+              console.log(
+                "SLATE ONCHANGE:",
+                getEditorText(editor.children)
+              );
+            }}
             />  
         </div>
         
@@ -285,7 +273,7 @@ export default function RichTextEditor() {
           
        {analysis && (
         <div className="analysis-panel" style={{
-          maxHeight: "400px",
+          minHeight: "400px",
           overflowY: "auto",
         }}>
           <h2>Extrahierte Fakten</h2>
