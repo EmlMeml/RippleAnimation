@@ -22,6 +22,7 @@ import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
+import { ParaglidingRounded } from "@mui/icons-material";
 
 type CustomText = {
   text: string;
@@ -88,6 +89,26 @@ export default function RichTextEditor() {
   const [analyzing, setAnalyzing] = useState(false);
 
   const [, setAnalysisError] = useState("");
+
+  function replaceEditorContent(nodes: Descendant[]) {
+  Editor.withoutNormalizing(editor, () => {
+    // Bestehenden Inhalt entfernen
+    Transforms.removeNodes(editor, {
+      at: [],
+      match: (_, path) => path.length === 1,
+    });
+
+    // Neuen Inhalt einfügen
+    Transforms.insertNodes(editor, nodes, {
+      at: [0],
+    });
+  });
+
+  Transforms.select(editor, {
+    anchor: { path: [0, 0], offset: 0 },
+    focus: { path: [0, 0], offset: 0 },
+  });
+}
 
   function deserialize(
     node: Node,
@@ -178,110 +199,66 @@ export default function RichTextEditor() {
         children: [{ text: "" }],
         });
     }
-
-    editor.children = nodes;
-
-    editor.selection = {
-        anchor: {
-        path: [0, 0],
-        offset: 0,
-        },
-        focus: {
-        path: [0, 0],
-        offset: 0,
-        },
-    };
-
-    editor.onChange();
-
-    setValue(nodes);
+    replaceEditorContent(nodes);
+    
     }
 
   function handleFileLoad(text: string) {
-  const paragraphs: ParagraphElement[] = text
-    .split(/\r?\n/)
-    .map((line) => ({
-      type: "paragraph",
-      children: [{ text: line }],
-    }));
+    const paragraphs: ParagraphElement[] = text
+      .split(/\r?\n/)
+      .map((line) => ({
+        type: "paragraph",
+        children: [{ text: line }],
+      }));
 
-  editor.children = paragraphs;
-
-  editor.selection = {
-    anchor: {
-      path: [0, 0],
-      offset: 0,
-    },
-    focus: {
-      path: [0, 0],
-      offset: 0,
-    },
-  };
-
-  editor.onChange();
-
-  setValue(paragraphs);
-}
+    replaceEditorContent(paragraphs);
+  }
 
   async function handleAnalyze() {
-    setAnalyzing(true);
-    setAnalysisError("");
+  setAnalyzing(true);
+  setAnalysisError("");
 
-    try {
+  try {
+    const text = getEditorText(editor.children);
 
-      //fixes current Editor Bug: Cant edit after analysis
-      if (
-          editor.children.length === 0 ||
-          !editor.children[0] ||
-          !SlateElement.isElement(editor.children[0])
-        ) {
-          editor.children = [
-            {
-              type: "paragraph",
-              children: [{ text: "" }],
-            },
-          ];
-
-          editor.selection = {
-            anchor: { path: [0, 0], offset: 0 },
-            focus: { path: [0, 0], offset: 0 },
-          };
-
-          editor.onChange();
-        }
-
-      const text = getEditorText(editor.children);
-
-      if (!text.trim()) {
-        setAnalysisError("Der Editor ist leer.");
-        return;
-      }
-
-
-      const result = await extractFacts(text);
-
-      console.log("AI result:");
-      console.log(result);
-      
-      setAnalysis(result);
-
-
-      const foundInconsistencies = checkConsistency(result);
-      console.log("Inconsistencies: ", foundInconsistencies);
-      setInconsistencies(foundInconsistencies);
-
-    } catch (error) {
-      console.error(error);
-
-      setAnalysisError(
-        error instanceof Error
-          ? error.message
-          : "Unbekannter Fehler"
-      );
-    } finally {
-      setAnalyzing(false);
+    if (!text.trim()) {
+      setAnalysisError("Der Editor ist leer.");
+      return;
     }
+
+    console.log("BEFORE ANALYSIS", {
+      children: editor.children,
+      selection: editor.selection,
+    });
+
+    const result = await extractFacts(text);
+
+    console.log("AI result:", result);
+
+    setAnalysis(result);
+
+    const foundInconsistencies = checkConsistency(result);
+
+    console.log("Inconsistencies:", foundInconsistencies);
+
+    setInconsistencies(foundInconsistencies);
+
+    console.log("AFTER ANALYSIS", {
+      children: editor.children,
+      selection: editor.selection,
+    });
+  } catch (error) {
+    console.error(error);
+
+    setAnalysisError(
+      error instanceof Error
+        ? error.message
+        : "Unbekannter Fehler"
+    );
+  } finally {
+    setAnalyzing(false);
   }
+}
 
   return (
     <div className="editor-container">
