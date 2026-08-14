@@ -515,4 +515,79 @@ it("erkennt hierarchische located_in Fakten nicht als Widerspruch", () => {
   expect(result).toHaveLength(0);
 });
 
+/*
+ * Zeitliche Konsistenzen 
+ */
+it("erkennt unterschiedliche Orte zu unterschiedlichen Zeitpunkten als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      { id: "anna", name: "Anna", type: "person" },
+      { id: "munich", name: "München", type: "place" },
+      { id: "berlin", name: "Berlin", type: "place" },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt unterschiedliche Orte zum gleichen Zeitpunkt als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      { id: "anna", name: "Anna", type: "person" },
+      { id: "munich", name: "München", type: "place" },
+      { id: "berlin", name: "Berlin", type: "place" },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
 });

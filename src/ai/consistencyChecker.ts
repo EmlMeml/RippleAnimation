@@ -187,6 +187,60 @@ function getSymmetricRelationKey(fact: Fact): string | null {
   ].join("|");
 } */
 
+function temporalContextsOverlap(
+  factA: Fact,
+  factB: Fact
+): boolean {
+  // Wenn mindestens einer der Facts keinen zeitlichen
+  // Kontext besitzt, behandeln wir ihn als zeitlich
+  // unbeschränkt.
+  if (!factA.temporal || !factB.temporal) {
+    return true;
+  }
+
+  const fromA =
+    factA.temporal.from ??
+    factA.temporal.to;
+
+  const toA =
+    factA.temporal.to ??
+    factA.temporal.from;
+
+  const fromB =
+    factB.temporal.from ??
+    factB.temporal.to;
+
+  const toB =
+    factB.temporal.to ??
+    factB.temporal.from;
+
+  // Falls kein normalisierter Zeitraum vorhanden ist,
+  // können wir keine zeitliche Trennung feststellen.
+  if (!fromA || !toA || !fromB || !toB) {
+    return true;
+  }
+
+  return (
+    fromA <= toB &&
+    fromB <= toA
+  );
+}
+
+function getFactKey(fact: Fact): string {
+  const value = getFactValue(fact);
+
+  const from = fact.temporal?.from ?? "";
+  const to = fact.temporal?.to ?? "";
+
+  return [
+    normalizeValue(fact.subject),
+    fact.predicate,
+    value,
+    from,
+    to,
+  ].join("|");
+}
+
 function checkExclusiveFacts(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -197,10 +251,7 @@ function checkExclusiveFacts(
       (fact) => fact.predicate === predicate
     );
 
-    const grouped = new Map<
-      string,
-      Fact[]
-    >();
+    const grouped = new Map<string, Fact[]>();
 
     for (const fact of facts) {
       const subject = normalizeValue(fact.subject);
@@ -209,35 +260,50 @@ function checkExclusiveFacts(
         grouped.get(subject) ?? [];
 
       existing.push(fact);
-
       grouped.set(subject, existing);
     }
 
-    for (const [
-      subject,
-      subjectFacts,
-    ] of grouped) {
-      const uniqueValues = new Set(
-        subjectFacts.map(getFactValue)
-      );
+    for (const [subject, subjectFacts] of grouped) {
+        const uniqueFacts = Array.from(
+          new Map(
+            subjectFacts.map((fact) => [
+              getFactKey(fact),
+              fact,
+            ])
+          ).values()
+        );
+      for (let i = 0; i < uniqueFacts.length; i++) {
+        for (let j = i + 1; j < uniqueFacts.length; j++) {
+          const factA = uniqueFacts[i];
+          const factB = uniqueFacts[j];
 
-      if (uniqueValues.size > 1) {
-        inconsistencies.push({
-          type: "conflicting_fact",
-          subject,
-          predicate,
-          facts: subjectFacts,
-          message:
-            `${subject} hat widersprüchliche Angaben für ` +
-            `"${predicate}".`,
-        });
+          const valueA = getFactValue(factA);
+          const valueB = getFactValue(factB);
+
+          if (valueA === valueB) {
+            continue;
+          }
+
+          if (!temporalContextsOverlap(factA, factB)) {
+            continue;
+          }
+
+          inconsistencies.push({
+            type: "conflicting_fact",
+            subject,
+            predicate,
+            facts: [factA, factB],
+            message:
+              `${subject} hat widersprüchliche Angaben für ` +
+              `"${predicate}".`,
+          });
+        }
       }
     }
   }
 
   return inconsistencies;
 }
-
 function checkOpposingPredicates(
   extraction: FactExtraction
 ): Inconsistency[] {
