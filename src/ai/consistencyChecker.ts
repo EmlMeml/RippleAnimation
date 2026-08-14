@@ -108,25 +108,6 @@ function getFactValue(fact: Fact): string {
 }
 
 /*
- * Erstellt einen eindeutigen Schlüssel für eine Beziehung.
- *
- * Wichtig:
- * Subject und Object werden getrennt normalisiert.
- */
-/* function getRelationKey(fact: Fact): string | null {
-  if (fact.object === undefined || fact.object === null) {
-    return null;
-  }
-
-  return [
-    normalizeValue(fact.subject),
-    fact.predicate,
-    normalizeValue(fact.object),
-  ].join("|");
-}
- */
-
-/*
  * Erstellt einen Schlüssel für eine symmetrische Beziehung.
  *
  */
@@ -146,46 +127,7 @@ function getSymmetricRelationKey(fact: Fact): string | null {
     entities[1],
   ].join("|");
 }
-
-/*
- * Erstellt einen Schlüssel für eine inverse Beziehung.
- *
- */
-/* function getInverseRelationKey(fact: Fact): string | null {
-  if (fact.object === undefined || fact.object === null) {
-    return null;
-  }
-
-  const inversePredicate =
-    inversePredicates[fact.predicate];
-
-  if (!inversePredicate) {
-    return null;
-  }
-
-  const subject = normalizeValue(fact.subject);
-  const object = normalizeValue(fact.object);*/
-
-  /*
-   * Wir bringen beide Richtungen auf dieselbe Form.
-   */
-  /*const predicatePair = [
-    fact.predicate,
-    inversePredicate,
-  ].sort();
-
-  const entityPair = [
-    subject,
-    object,
-  ].sort();
-
-  return [
-    predicatePair[0],
-    predicatePair[1],
-    entityPair[0],
-    entityPair[1],
-  ].join("|");
-} */
+ 
 
 function temporalContextsOverlap(
   factA: Fact,
