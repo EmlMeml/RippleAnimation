@@ -67,26 +67,11 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
   }
 
   return (
-    <div>
+    <div className='uploadDiv'>
       <label
-        style={{
-          cursor: 'pointer',
-          height:'38px',
-          paddingRight:'12px',
-          paddingLeft:'8px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          position: 'relative',
-          overflow: 'hidden',
-          color: '#000000',
-          border: '1px solid #000000',
-          borderRadius:'4px',
-          background:'#ba9a91',
-          fontSize:'14px'
-        }}
+        className='fileUploadBtn'
       >
-        <UploadFileIcon style={{ color: '#000000' }} />
+        <UploadFileIcon style={{ color: '#2b311c' }} />
         Upload File
         <input
           type="file"

@@ -100,10 +100,6 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [, setAnalysisError] = useState("");
 
-  const storyContext: StoryContext = {
-    referenceDate: "2026-08-14",
-  };
-
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
       editor.children = nodes;
@@ -451,7 +447,7 @@ function Toolbar({
       <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
       <button
       type="button"
-      style={{color:'#000'}}
+      style={{color:'#2b311c'}}
       onMouseDown={(event) => {
         event.preventDefault();
         onAnalyze();
