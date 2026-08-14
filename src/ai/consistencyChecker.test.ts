@@ -181,4 +181,139 @@ describe("checkConsistency", () => {
 
     expect(result).toHaveLength(0);
   });
+
+  it("erkennt sibling_of mit sich selbst als Widerspruch", () => {
+    const extraction: FactExtraction = {
+        entities: [],
+        facts: [
+        {
+            subject: "Anna",
+            predicate: "sibling_of",
+            object: "Anna",
+        },
+        ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt married_to mit sich selbst als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "married_to",
+        object: "Anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt eine normale married_to Beziehung als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "married_to",
+        object: "Thomas",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen indirekten younger_than/older_than Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Thomas",
+      },
+      {
+        subject: "Thomas",
+        predicate: "younger_than",
+        object: "Peter",
+      },
+      {
+        subject: "Anna",
+        predicate: "older_than",
+        object: "Peter",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen indirekten Konflikt über mehrere Ebenen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Thomas",
+      },
+      {
+        subject: "Thomas",
+        predicate: "younger_than",
+        object: "Peter",
+      },
+      {
+        subject: "Peter",
+        predicate: "younger_than",
+        object: "Klaus",
+      },
+      {
+        subject: "Anna",
+        predicate: "older_than",
+        object: "Klaus",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt einen transitiven younger_than Pfad ohne Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Thomas",
+      },
+      {
+        subject: "Thomas",
+        predicate: "younger_than",
+        object: "Peter",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
 });

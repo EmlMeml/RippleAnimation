@@ -16,12 +16,6 @@ export interface Inconsistency {
  * Diese Prädikate dürfen für ein Subjekt
  * normalerweise nur einen unterschiedlichen Wert haben.
  *
- * Beispiel:
- *
- * Anna -> lives_in -> Munich
- * Anna -> lives_in -> Berlin
- *
- * => Konflikt
  */
 const exclusivePredicates: Predicate[] = [
   "age",
@@ -35,12 +29,6 @@ const exclusivePredicates: Predicate[] = [
 /*
  * Diese Prädikate stehen logisch im direkten Gegensatz zueinander.
  *
- * Beispiel:
- *
- * Anna -> younger_than -> Thomas
- * Anna -> older_than -> Thomas
- *
- * => Konflikt
  */
 const opposingPredicates: Array<
   [Predicate, Predicate]
@@ -52,55 +40,53 @@ const opposingPredicates: Array<
  * Inverse Beziehungen beschreiben dieselbe Beziehung
  * aus unterschiedlichen Perspektiven.
  *
- * Beispiel:
- *
- * Anna -> parent_of -> Thomas
- * Thomas -> child_of -> Anna
- *
- * => konsistent
- *
- * Dagegen:
- *
- * Anna -> parent_of -> Thomas
- * Anna -> child_of -> Thomas
- *
- * => Konflikt
  */
 const inversePredicates: Partial<
   Record<Predicate, Predicate>
 > = {
   parent_of: "child_of",
   child_of: "parent_of",
+
+  owns:"has",
+  has: "owns",
 };
 
 /*
  * Symmetrische Beziehungen müssen nicht doppelt
  * angegeben werden, sind aber auch nicht widersprüchlich.
  *
- * Beispiel:
- *
- * Anna -> sibling_of -> Thomas
- * Thomas -> sibling_of -> Anna
- *
- * => konsistent
- *
- * Dasselbe gilt für friend_of.
  */
 const symmetricPredicates: Predicate[] = [
   "sibling_of",
   "friend_of",
+  "married_to",
+];
+
+/*
+* Selbstbeziehungen
+*/
+
+const irreflexivePredicates: Predicate[] = [
+  "sibling_of",
+  "friend_of",
+  "married_to",
+  "younger_than",
+  "older_than",
+  "parent_of",
+  "child_of",
+];
+
+/*
+ * Transitive Beziehungen/ transitive relationships 
+*/
+const transitivePredicates: Predicate[] = [
+  "younger_than",
+  "older_than",
 ];
 
 /*
  * Normalisiert Werte für Vergleiche.
  *
- * Dadurch gelten beispielsweise:
- *
- * "Munich"
- * "munich"
- * " Munich "
- *
- * als derselbe Wert.
  */
 function normalizeValue(value: unknown): string {
   return String(value ?? "")
@@ -111,11 +97,6 @@ function normalizeValue(value: unknown): string {
 /*
  * Liefert den Vergleichswert eines Facts.
  *
- * Attribute:
- *   Anna -> age -> 27
- *
- * Beziehungen:
- *   Anna -> lives_in -> Munich
  */
 function getFactValue(fact: Fact): string {
   if (fact.object !== undefined) {
@@ -143,18 +124,10 @@ function getFactValue(fact: Fact): string {
   ].join("|");
 }
  */
+
 /*
  * Erstellt einen Schlüssel für eine symmetrische Beziehung.
  *
- * Dadurch werden beispielsweise:
- *
- * Anna -> sibling_of -> Thomas
- *
- * und
- *
- * Thomas -> sibling_of -> Anna
- *
- * als dieselbe Beziehung betrachtet.
  */
 function getSymmetricRelationKey(fact: Fact): string | null {
   if (fact.object === undefined || fact.object === null) {
@@ -176,15 +149,6 @@ function getSymmetricRelationKey(fact: Fact): string | null {
 /*
  * Erstellt einen Schlüssel für eine inverse Beziehung.
  *
- * Beispiel:
- *
- * Anna -> parent_of -> Thomas
- *
- * und
- *
- * Thomas -> child_of -> Anna
- *
- * bekommen denselben kanonischen Schlüssel.
  */
 /* function getInverseRelationKey(fact: Fact): string | null {
   if (fact.object === undefined || fact.object === null) {
@@ -282,6 +246,7 @@ function checkOpposingPredicates(
     predicateA,
     predicateB,
   ] of opposingPredicates) {
+
     const factsA = extraction.facts.filter(
       (fact) => fact.predicate === predicateA
     );
@@ -338,12 +303,6 @@ function checkInversePredicates(
    * Wir prüfen nur Fälle, bei denen dasselbe Subjekt
    * mit demselben Objekt beide Richtungen verwendet.
    *
-   * Beispiel:
-   *
-   * Anna -> parent_of -> Thomas
-   * Anna -> child_of -> Thomas
-   *
-   * Das ist widersprüchlich.
    */
   for (const [
     predicateA,
@@ -353,13 +312,8 @@ function checkInversePredicates(
   >) {
     /*
      * Damit wir nicht denselben Paarvergleich zweimal
-     * durchführen:
+     * durchführen
      *
-     * parent_of -> child_of
-     *
-     * aber nicht anschließend noch einmal:
-     *
-     * child_of -> parent_of
      */
     if (predicateA > predicateB) {
       continue;
@@ -449,6 +403,205 @@ function checkSymmetricPredicates(
   return [];
 }
 
+function checkSelfRelations(
+  extraction: FactExtraction
+): Inconsistency[] {
+  const inconsistencies: Inconsistency[] = [];
+
+  for (const fact of extraction.facts) {
+    if (!irreflexivePredicates.includes(fact.predicate)) {
+      continue;
+    }
+
+    if (
+      fact.object === undefined ||
+      fact.object === null
+    ) {
+      continue;
+    }
+
+    if (
+      normalizeValue(fact.subject) !==
+      normalizeValue(fact.object)
+    ) {
+      continue;
+    }
+
+    inconsistencies.push({
+      type: "conflicting_fact",
+      subject: fact.subject,
+      predicate: fact.predicate,
+      facts: [fact],
+      message:
+        `${fact.subject} kann nicht über ` +
+        `"${fact.predicate}" mit sich selbst ` +
+        `in Beziehung stehen.`,
+    });
+  }
+
+  return inconsistencies;
+}
+
+function hasTransitiveRelation(
+  facts: Fact[],
+  predicate: Predicate,
+  start: string,
+  target: string
+): boolean {
+  const normalizedStart = normalizeValue(start);
+  const normalizedTarget = normalizeValue(target);
+
+  const queue: Array<{
+    entity: string;
+    depth: number;
+  }> = [
+    {
+      entity: normalizedStart,
+      depth: 0,
+    },
+  ];
+
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current) {
+      continue;
+    }
+
+    const {
+      entity,
+      depth,
+    } = current;
+
+    /*
+     * Eine transitive Beziehung braucht
+     * mindestens zwei Kanten.
+     */
+    if (
+      entity === normalizedTarget &&
+      depth >= 2
+    ) {
+      return true;
+    }
+
+    const visitKey = `${entity}|${depth}`;
+
+    if (visited.has(visitKey)) {
+      continue;
+    }
+
+    visited.add(visitKey);
+
+    for (const fact of facts) {
+      if (fact.predicate !== predicate) {
+        continue;
+      }
+
+      if (
+        fact.object === undefined ||
+        fact.object === null
+      ) {
+        continue;
+      }
+
+      if (
+        normalizeValue(fact.subject) !== entity
+      ) {
+        continue;
+      }
+
+      const next = normalizeValue(fact.object);
+
+      queue.push({
+        entity: next,
+        depth: depth + 1,
+      });
+    }
+  }
+
+  return false;
+}
+
+function checkTransitivePredicates(
+  extraction: FactExtraction
+): Inconsistency[] {
+  const inconsistencies: Inconsistency[] = [];
+
+  for (const predicate of transitivePredicates) {
+    const facts = extraction.facts.filter(
+      (fact) => fact.predicate === predicate
+    );
+
+    for (const fact of facts) {
+      if (
+        fact.object === undefined ||
+        fact.object === null
+      ) {
+        continue;
+      }
+
+      const oppositePredicate =
+        predicate === "younger_than"
+          ? "older_than"
+          : "younger_than";
+
+      const oppositeFacts =
+        extraction.facts.filter(
+          (candidate) =>
+            candidate.predicate ===
+            oppositePredicate
+        );
+
+      for (const oppositeFact of oppositeFacts) {
+        if (
+          oppositeFact.object === undefined ||
+          oppositeFact.object === null
+        ) {
+          continue;
+        }
+
+        if (
+          normalizeValue(
+            oppositeFact.subject
+          ) !== normalizeValue(fact.subject)
+        ) {
+          continue;
+        }
+
+        const hasIndirectRelation =
+          hasTransitiveRelation(
+            facts,
+            predicate,
+            fact.subject,
+            oppositeFact.object
+          );
+
+        if (!hasIndirectRelation) {
+          continue;
+        }
+
+        inconsistencies.push({
+          type: "conflicting_fact",
+          subject: fact.subject,
+          predicate,
+          facts: [
+            fact,
+            oppositeFact,
+          ],
+          message:
+            `${fact.subject} hat widersprüchliche ` +
+            `Altersbeziehungen: "${predicate}" ` +
+            `und "${oppositePredicate}".`,
+        });
+      }
+    }
+  }
+
+  return inconsistencies;
+}
+
 export function checkConsistency(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -480,6 +633,21 @@ export function checkConsistency(
    */
   inconsistencies.push(
     ...checkSymmetricPredicates(extraction)
+  );
+
+  /*
+  * 5. Selbstbeziehungen
+  */
+  inconsistencies.push(
+    ...checkSelfRelations(extraction)
+  );
+
+
+  /* 
+  * 6. Transistive Beziehungen
+   */
+  inconsistencies.push(
+    ...checkTransitivePredicates(extraction)
   );
 
   return inconsistencies;
