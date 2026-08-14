@@ -24,6 +24,7 @@ const exclusivePredicates: Predicate[] = [
   "lives_in",
   "works_at",
   "occupation",
+  "located_in",
 ];
 
 /*
