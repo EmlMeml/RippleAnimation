@@ -50,6 +50,7 @@
 }
 
 .toolbar .uploadDiv .fileUploadBtn:hover{
+  cursor: pointer;
   background: #819253;
 }
 
