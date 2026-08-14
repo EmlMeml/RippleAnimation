@@ -47,6 +47,8 @@ describe("extractFacts", () => {
       object: "munich",
       temporal: {
         text: "heute",
+        from: "2026-08-14",
+        to: "2026-08-14",
       },
     });
 
@@ -105,27 +107,28 @@ describe("extractFacts", () => {
 
   expect(result.facts).toHaveLength(2);
 
-  expect(result.facts).toContainEqual(
-    expect.objectContaining({
-      subject: "anna",
-      predicate: "located_in",
-      object: "munich",
-      temporal: {
-        text: "heute",
-      },
-    })
-  );
+  expect(result.facts).toContainEqual({
+    subject: "anna",
+    predicate: "located_in",
+    object: "munich",
+    temporal: {
+      text: "heute",
+      from: "2026-08-14",
+      to: "2026-08-14",
+    },
+  });
 
-  expect(result.facts).toContainEqual(
-    expect.objectContaining({
-      subject: "anna",
-      predicate: "located_in",
-      object: "berlin",
-      temporal: {
-        text: "morgen",
-      },
-    })
-  );
+  expect(result.facts).toContainEqual({
+  subject: "anna",
+  predicate: "located_in",
+  object: "berlin",
+  temporal: {
+    text: "morgen",
+    from: "2026-08-15",
+    to: "2026-08-15",
+  },
+  });
+  
   });
 
   it("akzeptiert Facts ohne zeitlichen Kontext", async () => {
@@ -157,6 +160,86 @@ describe("extractFacts", () => {
     subject: "anna",
     predicate: "occupation",
     value: "writer",
+  });
+  });
+
+  it("normalisiert zeitlichen Kontext anhand des StoryContext", async () => {
+  vi.mocked(askAI).mockResolvedValue({
+    entities: [
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+      {
+        id: "berlin",
+        name: "Berlin",
+        type: "place",
+      },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          text: "morgen",
+        },
+      },
+    ],
+  });
+
+  const result = await extractFacts(
+    "Anna wird morgen nach Berlin fahren.",
+    {
+      referenceDate: "2026-08-14",
+    }
+  );
+
+  expect(result.facts[0].temporal).toEqual({
+    text: "morgen",
+    from: "2026-08-15",
+    to: "2026-08-15",
+  });
+  });
+
+  it("normalisiert heute anhand des StoryContext", async () => {
+  vi.mocked(askAI).mockResolvedValue({
+    entities: [
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+      {
+        id: "munich",
+        name: "Munich",
+        type: "place",
+      },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "heute",
+        },
+      },
+    ],
+  });
+
+  const result = await extractFacts(
+    "Anna ist heute in München.",
+    {
+      referenceDate: "2026-08-14",
+    }
+  );
+
+  expect(result.facts[0].temporal).toEqual({
+    text: "heute",
+    from: "2026-08-14",
+    to: "2026-08-14",
   });
   });
 

@@ -1,6 +1,7 @@
 import type { FactExtraction } from "../types/facts";
 import type { StoryContext } from "../types/story";
 import { askAI } from "./../ai/api";
+import { normalizeTemporal } from "./temporalNormalizer";
 
 export async function extractFacts(
   text: string,
@@ -261,6 +262,17 @@ TEXT:
 
 ${text}
 `;
+  const extraction = await askAI(prompt);
 
-  return await askAI(prompt);
+
+  return {
+  ...extraction,
+  facts: extraction.facts.map((fact) => ({
+    ...fact,
+    temporal: normalizeTemporal(
+      fact.temporal,
+      context
+    ),
+  })),
+};
 }
