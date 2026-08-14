@@ -15,13 +15,15 @@ import {
 import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
-import { extractFacts } from "./../../ai/api";
+import { extractFacts } from "./../../analysis/extractesFacts";
 import type { FactExtraction } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
+
+import type { StoryContext } from "../../types/story";
 
 type CustomText = {
   text: string;
@@ -72,7 +74,7 @@ const initialValue: Descendant[] = [
   },
 ];
 
-export default function RichTextEditor() {
+export default function RichTextEditor({context,}: {context: StoryContext}) {
   const editor = useMemo(() => {
     const e = withHistory(
     withReact(createEditor())
@@ -97,6 +99,10 @@ export default function RichTextEditor() {
   const [analyzing, setAnalyzing] = useState(false);
 
   const [, setAnalysisError] = useState("");
+
+  const storyContext: StoryContext = {
+    referenceDate: "2026-08-14",
+  };
 
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
@@ -309,7 +315,7 @@ function deserialize(
         setAnalysisError("Der Editor ist leer.");
         return;
       }
-      const result = await extractFacts(text);
+      const result = await extractFacts(text,context);
 
       setAnalysis(result);
 

@@ -30,6 +30,13 @@ export interface Entity {
   type: EntityType;
 }
 
+export interface TemporalContext {
+  text?: string;
+
+  from?: string;
+  to?: string;
+}
+
 export interface Fact {
   subject: string;
   predicate: Predicate;
@@ -41,6 +48,8 @@ export interface Fact {
   // Used for relations such as:
   // Thomas -> younger_than -> Anna
   object?: string | null;
+
+  temporal?: TemporalContext;
 
   source?: {
     start: number;
