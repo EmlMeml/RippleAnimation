@@ -2624,5 +2624,66 @@ it("erkennt alternative located_in Pfade mit gemeinsamem Zwischengebiet als kons
 });
 
 
+it("erkennt einen transitiven Zyklus nur bei zeitlich überlappenden Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "a",
+        predicate: "located_in",
+        object: "b",
+        temporal: {
+          from: "2020",
+          to: "2022",
+        },
+      },
+      {
+        subject: "b",
+        predicate: "located_in",
+        object: "a",
+        temporal: {
+          from: "2021",
+          to: "2023",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt keinen transitiven Zyklus bei vollständig getrennten Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "a",
+        predicate: "located_in",
+        object: "b",
+        temporal: {
+          from: "2020",
+          to: "2021",
+        },
+      },
+      {
+        subject: "b",
+        predicate: "located_in",
+        object: "a",
+        temporal: {
+          from: "2022",
+          to: "2023",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
 
 });
