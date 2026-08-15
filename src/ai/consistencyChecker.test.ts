@@ -919,7 +919,9 @@ it("erkennt überschneidende unterschiedliche Arbeitgeber als Widerspruch", () =
   expect(result).toHaveLength(1);
 });
 
-
+/* 
+ * Zeitliche Tests
+*/
 it("erkennt zeitlich getrennte opposing predicates als konsistent", () => {
   const extraction: FactExtraction = {
     entities: [],
@@ -948,40 +950,6 @@ it("erkennt zeitlich getrennte opposing predicates als konsistent", () => {
   };
 
   const result = checkConsistency(extraction);
-
-  expect(result).toHaveLength(0);
-});
-
-it("erkennt zeitlich getrennte inverse Richtungen als konsistent", () => {
-  const extraction: FactExtraction = {
-    entities: [],
-    facts: [
-      {
-        subject: "anna",
-        predicate: "parent_of",
-        object: "thomas",
-        temporal: {
-          text: "heute",
-          from: "2026-08-14",
-          to: "2026-08-14",
-        },
-      },
-      {
-        subject: "anna",
-        predicate: "child_of",
-        object: "thomas",
-        temporal: {
-          text: "morgen",
-          from: "2026-08-15",
-          to: "2026-08-15",
-        },
-      },
-    ],
-  };
-
-  const result = checkConsistency(extraction);
-
-  console.log(result);
 
   expect(result).toHaveLength(0);
 });
@@ -1092,5 +1060,1569 @@ it("erkennt zeitlich getrennten transitiven Konflikt als konsistent", () => {
 
   expect(result).toHaveLength(0);
 });
+
+it("erkennt einen transitiven Konflikt bei vollständig überlappendem Zeitraum", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt einen transitiven Konflikt nicht, wenn der Gegen-Fact zeitlich getrennt ist", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt keinen transitiven Konflikt, wenn eine Kante des Pfades zeitlich getrennt ist", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+
+
+/*
+ *  Zyklen
+*/
+it("erkennt einen direkten Zyklus bei younger_than", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen indirekten Zyklus bei younger_than", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt eine normale transitive younger_than Kette nicht als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen längeren transitiven Zyklus", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "david",
+      },
+      {
+        subject: "david",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt einen Zyklus bei older_than", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "older_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "older_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt zeitlich getrennte transitive Zyklen nicht als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen direkten Selbstzyklus bei younger_than", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen direkten Selbstzyklus bei older_than", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+/*
+ * zeitliche Zykluslogik
+*/
+
+it("erkennt einen zeitlich vollständig überlappenden Zyklus", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt keinen Zyklus bei vollständig getrennten Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "14.08.",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt keinen Zyklus wenn eine Kante zeitlich getrennt ist", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen Zyklus bei teilweise überlappenden Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "14.08. bis 16.08.",
+          from: "2026-08-14",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "15.08. bis 17.08.",
+          from: "2026-08-15",
+          to: "2026-08-17",
+        },
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen Zyklus bei einem gemeinsamen zeitlichen Grenztag", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "14.08. bis 15.08.",
+          from: "2026-08-14",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "15.08. bis 16.08.",
+          from: "2026-08-15",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          text: "15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+/*
+ *  undefined/null
+ */
+it("ignoriert younger_than Fakten ohne Objekt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: undefined,
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("ignoriert younger_than Fakten mit null als Objekt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: null,
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+/*
+ * Case-insensitiver Zyklus 
+ */
+
+it("erkennt einen direkten Zyklus unabhängig von Groß-/Kleinschreibung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "ANNA",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen indirekten Zyklus unabhängig von Groß-/Kleinschreibung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "Clara",
+      },
+      {
+        subject: "CLARA",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("meldet einen Zyklus trotz doppelter Fakten nur einmal", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("meldet einen längeren Zyklus mit Duplikaten nur einmal", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "david",
+      },
+      {
+        subject: "david",
+        predicate: "younger_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+/*
+ *  Zykeln + Gegenrelation
+ */
+it("erkennt einen Zyklus und einen direkten Gegen-Fact ohne doppelte Meldung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(
+    result.filter(
+      (inconsistency) =>
+        inconsistency.type === "conflicting_fact"
+    ).length
+  ).toBeGreaterThan(0);
+});
+
+it("erkennt einen Zyklus und den daraus resultierenden Gegen-Fact", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "anna",
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result.length).toBeGreaterThan(0);
+
+  expect(
+    result.some(
+      (inconsistency) =>
+        inconsistency.type === "conflicting_fact" &&
+        inconsistency.predicate === "younger_than"
+    )
+  ).toBe(true);
+});
+
+it("erkennt keine Inkonsistenz bei konsistent umgekehrter Altersbeziehung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "clara",
+        predicate: "older_than",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt keinen Alterskonflikt bei zeitlich getrennter Gegenbeziehung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+/*
+ * Alters-/Translativitätlogik 
+*/
+it("erkennt keinen Alterskonflikt bei zeitlich getrennter Gegenbeziehung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt eine mehrstufige located_in Hierarchie als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "europe",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt direkten und indirekten located_in Zusammenhang als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "germany",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen echten located_in Konflikt trotz vorhandener Hierarchie", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen located_in Konflikt über mehrere Hierarchieebenen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "europe",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+/*
+ * Zeitlich getrennte Hierarchie 
+*/
+it("erkennt zeitlich getrennte located_in Hierarchien als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt widersprüchliche located_in Angaben trotz Hierarchie", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen zeitlich überlappenden located_in Zyklus", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt keinen zeitlich getrennten located_in Zyklus als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "übermorgen",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+
+it("erkennt keinen located_in Zyklus bei nur teilweise überlappenden Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "14.08. bis 15.08.",
+          from: "2026-08-14",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "15.08. bis 16.08.",
+          from: "2026-08-15",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen located_in Zyklus bei vollständiger zeitlicher Überlappung", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "14.08. bis 16.08.",
+          from: "2026-08-14",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "15.08. bis 16.08.",
+          from: "2026-08-15",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+/*
+ * transistive Konfilkte ohne Zyklus 
+*/
+it("erkennt einen Widerspruch zwischen indirektem located_in Zusammenhang und direktem Fact", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen indirekten located_in Zusammenhang ohne Widerspruch als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt zeitlich getrennte indirekte located_in Beziehungen als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+        temporal: {
+          text: "2027",
+          from: "2027-01-01",
+          to: "2027-12-31",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+/*
+ * Grenzfälle zwischen exklusiven, inversen und transitiven Beziehungen 
+*/
+
+it("erkennt mehrstufige located_in Hierarchien mit gemeinsamem Obergebiet als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "europe",
+      },
+      {
+        subject: "france",
+        predicate: "located_in",
+        object: "europe",
+      },
+      {
+        subject: "paris",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen Konflikt bei mehrstufiger located_in Hierarchie", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "germany",
+        predicate: "located_in",
+        object: "europe",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt keinen Konflikt bei konsistenten alternativen located_in Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "southern_germany",
+      },
+      {
+        subject: "southern_germany",
+        predicate: "located_in",
+        object: "germany",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt widersprüchliche direkte located_in Angaben", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt unterschiedliche direkte located_in Angaben trotz gemeinsamem Obergebiet als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "france",
+      },
+      {
+        subject: "france",
+        predicate: "located_in",
+        object: "europe",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt alternative located_in Pfade mit gemeinsamem Zwischengebiet als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "bavaria",
+        predicate: "located_in",
+        object: "germany",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "southern_germany",
+      },
+      {
+        subject: "southern_germany",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+
 
 });

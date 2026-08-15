@@ -24,9 +24,9 @@ const exclusivePredicates: Predicate[] = [
   "gender",
   "born_in",
   "lives_in",
+  "located_in",
   "works_at",
   "occupation",
-  "located_in",
 ];
 
 /*
@@ -85,6 +85,7 @@ const irreflexivePredicates: Predicate[] = [
 const transitivePredicates: Predicate[] = [
   "younger_than",
   "older_than",
+  "located_in",
 ];
 
 /*
@@ -143,6 +144,267 @@ function getSymmetricRelationKey(fact: Fact): string | null {
     entities[0],
     entities[1],
   ].join("|");
+}
+
+function getReachableEntities(
+  facts: Fact[],
+  start: string,
+  predicate: Predicate
+): Set<string> {
+  const reachable = new Set<string>();
+  const queue = [normalizeValue(start)];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+
+    if (reachable.has(current)) {
+      continue;
+    }
+
+    reachable.add(current);
+
+    for (const fact of facts) {
+      if (fact.predicate !== predicate) {
+        continue;
+      }
+
+      if (
+        fact.object === undefined ||
+        fact.object === null
+      ) {
+        continue;
+      }
+
+      if (
+        normalizeValue(fact.subject) !== current
+      ) {
+        continue;
+      }
+
+      queue.push(
+        normalizeValue(fact.object)
+      );
+    }
+  }
+
+  return reachable;
+}
+
+function getOutgoingFacts(
+  facts: Fact[],
+  predicate: Predicate,
+  subject: string
+): Fact[] {
+  const normalizedSubject =
+    normalizeValue(subject);
+
+  return facts.filter(
+    (fact) =>
+      fact.predicate === predicate &&
+      fact.object !== undefined &&
+      fact.object !== null &&
+      normalizeValue(fact.subject) ===
+        normalizedSubject
+  );
+}
+
+function findLocatedInPaths(
+  facts: Fact[],
+  start: string,
+  target: string
+): Fact[][] {
+  const normalizedStart = normalizeValue(start);
+  const normalizedTarget = normalizeValue(target);
+
+  type QueueItem = {
+    entity: string;
+    path: Fact[];
+  };
+
+  const queue: QueueItem[] = [
+    {
+      entity: normalizedStart,
+      path: [],
+    },
+  ];
+
+  const paths: Fact[][] = [];
+
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current) {
+      continue;
+    }
+
+    const {
+      entity,
+      path,
+    } = current;
+
+    if (entity === normalizedTarget) {
+      paths.push(path);
+      continue;
+    }
+
+    const visitKey = [
+      entity,
+      ...path.map(getFactKey),
+    ].join("|");
+
+    if (visited.has(visitKey)) {
+      continue;
+    }
+
+    visited.add(visitKey);
+
+    for (const fact of facts) {
+      if (
+        fact.predicate !== "located_in" ||
+        fact.object === undefined ||
+        fact.object === null
+      ) {
+        continue;
+      }
+
+      if (
+        normalizeValue(fact.subject) !== entity
+      ) {
+        continue;
+      }
+
+      if (
+        path.some(
+          (pathFact) =>
+            getFactKey(pathFact) ===
+            getFactKey(fact)
+        )
+      ) {
+        continue;
+      }
+
+      queue.push({
+        entity: normalizeValue(fact.object),
+        path: [
+          ...path,
+          fact,
+        ],
+      });
+    }
+  }
+
+  return paths;
+}
+
+function isHierarchicalLocatedIn(
+  facts: Fact[],
+  from: string,
+  to: string,
+  referenceFacts: Fact[]
+): boolean {
+  const normalizedFrom = normalizeValue(from);
+  const normalizedTo = normalizeValue(to);
+
+  if (normalizedFrom === normalizedTo) {
+    return true;
+  }
+
+  const paths = findLocatedInPaths(
+    facts,
+    normalizedFrom,
+    normalizedTo
+  );
+
+  return paths.some((path) =>
+    referenceFacts.every((referenceFact) =>
+      path.every((pathFact) =>
+        temporalRangesOverlap(
+          pathFact,
+          referenceFact
+        )
+      )
+    )
+  );
+}
+
+
+
+function hasCommonDescendant(
+  facts: Fact[],
+  first: string,
+  second: string
+): boolean {
+  const firstReachable =
+    getReachableEntities(
+      facts,
+      first,
+      "located_in"
+    );
+
+  const secondReachable =
+    getReachableEntities(
+      facts,
+      second,
+      "located_in"
+    );
+
+  for (const entity of firstReachable) {
+    if (secondReachable.has(entity)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+function areLocatedInValuesCompatible(
+  facts: Fact[],
+  factA: Fact,
+  factB: Fact
+): boolean {
+  const valueA = getFactValue(factA);
+  const valueB = getFactValue(factB);
+
+  if (valueA === valueB) {
+    return true;
+  }
+
+  if (
+    isHierarchicalLocatedIn(
+      facts,
+      valueA,
+      valueB,
+      [factA, factB]
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    isHierarchicalLocatedIn(
+      facts,
+      valueB,
+      valueA,
+      [factA, factB]
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    hasCommonDescendant(
+      facts,
+      valueA,
+      valueB
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function checkExclusiveFacts(
@@ -239,6 +501,23 @@ function checkExclusiveFacts(
             continue;
           }
 
+          if (predicate === "located_in") {
+            const locatedFacts =
+              extraction.facts.filter(
+                (fact) =>
+                  fact.predicate === "located_in"
+              );
+
+            if (
+              areLocatedInValuesCompatible(
+                locatedFacts,
+                factA,
+                factB
+              )
+            ) {
+              continue;
+            }
+          }
           /*
            * Unterschiedliche Werte sind nur dann
            * widersprüchlich, wenn sich die zeitlichen
@@ -252,7 +531,7 @@ function checkExclusiveFacts(
           ) {
             continue;
           }
-
+          
           inconsistencies.push({
             type: "conflicting_fact",
             subject,
@@ -278,11 +557,7 @@ function checkOpposingPredicates(
 ): Inconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
-  for (const [
-    predicateA,
-    predicateB,
-  ] of opposingPredicates) {
-
+  for (const [predicateA, predicateB] of opposingPredicates) {
     const factsA = extraction.facts.filter(
       (fact) => fact.predicate === predicateA
     );
@@ -299,17 +574,35 @@ function checkOpposingPredicates(
         continue;
       }
 
-      const matchingFact = factsB.find(
-        (factB) =>
-          normalizeValue(factB.subject) ===
-            normalizeValue(factA.subject) &&
-          normalizeValue(factB.object) ===
-            normalizeValue(factA.object) &&
+      const matchingFact = factsB.find((factB) => {
+        if (
+          factB.object === undefined ||
+          factB.object === null
+        ) {
+          return false;
+        }
+
+        const sameSubject =
+          normalizeValue(factA.subject) ===
+          normalizeValue(factB.subject);
+
+        const sameObject =
+          normalizeValue(factA.object) ===
+          normalizeValue(factB.object);
+
+        const sameTime =
           temporalRangesOverlap(
             factA,
             factB
-          )
-      );
+          );
+
+        return (
+          sameSubject &&
+          sameObject &&
+          sameTime
+        );
+      });
+
       if (!matchingFact) {
         continue;
       }
@@ -338,12 +631,20 @@ function checkContradictoryInverseDirections(
 ): Inconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
-  for (const [
-    predicateA,
-    predicateB,
-  ] of Object.entries(inversePredicates) as Array<
-    [Predicate, Predicate]
-  >) {
+  for (const [predicateA, predicateB] of Object.entries(
+    inversePredicates
+  ) as Array<[Predicate, Predicate]>) {
+    /*
+     * Jede inverse Beziehung wird nur einmal geprüft.
+     *
+     * Beispiel:
+     * parent_of -> child_of
+     *
+     * child_of -> parent_of
+     *
+     * Die zweite Variante wäre dieselbe Prüfung
+     * in umgekehrter Richtung.
+     */
     if (predicateA > predicateB) {
       continue;
     }
@@ -364,17 +665,34 @@ function checkContradictoryInverseDirections(
         continue;
       }
 
-      const matchingFact = factsB.find(
-        (factB) =>
-          normalizeValue(factB.subject) ===
-            normalizeValue(factA.subject) &&
-          normalizeValue(factB.object) ===
-            normalizeValue(factA.object) &&
+      const matchingFact = factsB.find((factB) => {
+        if (
+          factB.object === undefined ||
+          factB.object === null
+        ) {
+          return false;
+        }
+
+        const sameSubject =
+          normalizeValue(factA.subject) ===
+          normalizeValue(factB.subject);
+
+        const sameObject =
+          normalizeValue(factA.object) ===
+          normalizeValue(factB.object);
+
+        const sameTime =
           temporalRangesOverlap(
             factA,
             factB
-          )
-      );
+          );
+
+        return (
+          sameSubject &&
+          sameObject &&
+          sameTime
+        );
+      });
 
       if (!matchingFact) {
         continue;
@@ -475,6 +793,75 @@ function checkSelfRelations(
   return inconsistencies;
 }
 
+
+function getTemporalIntersection(
+  currentFrom: string | undefined,
+  currentTo: string | undefined,
+  fact: Fact
+): {
+  from?: string;
+  to?: string;
+} | null {
+  const factFrom = fact.temporal?.from;
+  const factTo = fact.temporal?.to;
+
+  /*
+   * Bisher und neue Kante haben keine
+   * konkreten Zeitangaben.
+   */
+  if (
+    currentFrom === undefined ||
+    currentTo === undefined
+  ) {
+    if (
+      factFrom === undefined ||
+      factTo === undefined
+    ) {
+      return {};
+    }
+
+    return {
+      from: factFrom,
+      to: factTo,
+    };
+  }
+
+  /*
+   * Die neue Kante hat keinen konkreten Zeitraum.
+   * Der bisherige Zeitraum bleibt bestehen.
+   */
+  if (
+    factFrom === undefined ||
+    factTo === undefined
+  ) {
+    return {
+      from: currentFrom,
+      to: currentTo,
+    };
+  }
+
+  const overlapFrom =
+    currentFrom > factFrom
+      ? currentFrom
+      : factFrom;
+
+  const overlapTo =
+    currentTo < factTo
+      ? currentTo
+      : factTo;
+
+  if (overlapFrom > overlapTo) {
+    return null;
+  }
+
+  return {
+    from: overlapFrom,
+    to: overlapTo,
+  };
+}
+
+
+
 function hasTransitiveRelation(
   facts: Fact[],
   predicate: Predicate,
@@ -482,14 +869,19 @@ function hasTransitiveRelation(
   target: string,
   referenceFact: Fact
 ): boolean {
-  const normalizedStart = normalizeValue(start);
-  const normalizedTarget = normalizeValue(target);
+  const normalizedStart =
+    normalizeValue(start);
 
-  const queue: Array<{
+  const normalizedTarget =
+    normalizeValue(target);
+
+  type QueueItem = {
     entity: string;
     depth: number;
     path: Fact[];
-  }> = [
+  };
+
+  const queue: QueueItem[] = [
     {
       entity: normalizedStart,
       depth: 0,
@@ -512,27 +904,30 @@ function hasTransitiveRelation(
       path,
     } = current;
 
+    /*
+     * Ein direkter Fact reicht nicht.
+     * Wir suchen ausdrücklich einen indirekten
+     * transitiven Zusammenhang.
+     */
     if (
       entity === normalizedTarget &&
       depth >= 2
     ) {
-      /*
-       * Der gesamte transitive Pfad muss zeitlich
-       * mit dem Referenz-Fact überlappen.
-       */
-      const pathIsRelevant = path.every((fact) =>
-        temporalRangesOverlap(
-          fact,
-          referenceFact
-        )
-      );
+      const pathIsRelevant =
+        path.every((fact) =>
+          temporalRangesOverlap(
+            fact,
+            referenceFact
+          )
+        );
 
       if (pathIsRelevant) {
         return true;
       }
     }
 
-    const visitKey = `${entity}|${depth}`;
+    const visitKey =
+      `${entity}|${depth}`;
 
     if (visited.has(visitKey)) {
       continue;
@@ -540,24 +935,11 @@ function hasTransitiveRelation(
 
     visited.add(visitKey);
 
-    for (const fact of facts) {
-      if (fact.predicate !== predicate) {
-        continue;
-      }
-
-      if (
-        fact.object === undefined ||
-        fact.object === null
-      ) {
-        continue;
-      }
-
-      if (
-        normalizeValue(fact.subject) !== entity
-      ) {
-        continue;
-      }
-
+    for (const fact of getOutgoingFacts(
+      facts,
+      predicate,
+      entity
+    )) {
       /*
        * Eine Kante, die zeitlich nicht mit dem
        * Referenz-Fact zusammenfällt, kann nicht
@@ -572,15 +954,109 @@ function hasTransitiveRelation(
         continue;
       }
 
-      const next = normalizeValue(fact.object);
-
       queue.push({
-        entity: next,
+        entity: normalizeValue(fact.object),
         depth: depth + 1,
         path: [
           ...path,
           fact,
         ],
+      });
+    }
+  }
+
+  return false;
+}
+
+
+
+function hasTransitiveCycle(
+  facts: Fact[],
+  predicate: Predicate,
+  start: string,
+  referenceFact?: Fact
+): boolean {
+  const normalizedStart =
+    normalizeValue(start);
+
+  type QueueItem = {
+    entity: string;
+    depth: number;
+    from?: string;
+    to?: string;
+  };
+
+  const queue: QueueItem[] = [
+    {
+      entity: normalizedStart,
+      depth: 0,
+      from: referenceFact?.temporal?.from,
+      to: referenceFact?.temporal?.to,
+    },
+  ];
+
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current) {
+      continue;
+    }
+
+    const {
+      entity,
+      depth,
+      from,
+      to,
+    } = current;
+
+    /*
+     * Wir suchen einen Weg zurück zum
+     * Ausgangspunkt.
+     *
+     * Mindestens zwei Kanten sind notwendig.
+     */
+    if (
+      entity === normalizedStart &&
+      depth >= 2
+    ) {
+      return true;
+    }
+
+    const visitKey =
+      `${entity}|${depth}|${from ?? ""}|${to ?? ""}`;
+
+    if (visited.has(visitKey)) {
+      continue;
+    }
+
+    visited.add(visitKey);
+
+    for (const fact of getOutgoingFacts(
+      facts,
+      predicate,
+      entity
+    )) {
+      const temporalIntersection =
+        getTemporalIntersection(
+          from,
+          to,
+          fact
+        );
+
+      /*
+       * Keine gemeinsame Zeit mehr.
+       */
+      if (temporalIntersection === null) {
+        continue;
+      }
+
+      queue.push({
+        entity: normalizeValue(fact.object),
+        depth: depth + 1,
+        from: temporalIntersection.from,
+        to: temporalIntersection.to,
       });
     }
   }
@@ -606,17 +1082,59 @@ function checkTransitivePredicates(
         continue;
       }
 
-      const oppositePredicate =
-        predicate === "younger_than"
-          ? "older_than"
-          : "younger_than";
+      const normalizedSubject = normalizeValue(fact.subject);
+      const normalizedObject = normalizeValue(fact.object);
 
-      const oppositeFacts =
-        extraction.facts.filter(
-          (candidate) =>
-            candidate.predicate ===
-            oppositePredicate
-        );
+      if (normalizedSubject === normalizedObject) {
+        continue;
+      }
+
+      if (
+        hasTransitiveCycle(
+          facts,
+          predicate,
+          fact.subject,
+          fact
+        )
+      ) {
+        inconsistencies.push({
+          type: "conflicting_fact",
+          subject: fact.subject,
+          predicate,
+          facts: [fact],
+          message:
+            `${fact.subject} ist in einem ` +
+            `transitiven Zyklus für "${predicate}".`,
+        });
+
+        // Ein Zyklus wird nur einmal als Konflikt gemeldet.
+        break;
+      }
+    }
+    if (
+      predicate !== "younger_than" &&
+      predicate !== "older_than"
+    ) {
+      continue;
+    }
+    const oppositePredicate =
+      predicate === "younger_than"
+        ? "older_than"
+        : "younger_than";
+
+    const oppositeFacts =
+      extraction.facts.filter(
+        (fact) =>
+          fact.predicate === oppositePredicate
+      );
+
+    for (const fact of facts) {
+      if (
+        fact.object === undefined ||
+        fact.object === null
+      ) {
+        continue;
+      }
 
       for (const oppositeFact of oppositeFacts) {
         if (
@@ -626,22 +1144,35 @@ function checkTransitivePredicates(
           continue;
         }
 
-        if (
-          normalizeValue(
-            oppositeFact.subject
-          ) !== normalizeValue(fact.subject)
-        ) {
+        /*
+         * Der direkte und der indirekte Fact
+         * müssen dasselbe Subjekt betreffen.
+         */
+        const sameSubject =
+          normalizeValue(fact.subject) ===
+          normalizeValue(oppositeFact.subject);
+
+        if (!sameSubject) {
           continue;
         }
 
+        /*
+         * Suche einen transitiven Pfad:
+         *
+         * Anna -> Ben -> Clara
+         *
+         * und vergleiche ihn mit:
+         *
+         * Anna -> Clara
+         */
         const hasIndirectRelation =
-        hasTransitiveRelation(
-          facts,
-          predicate,
-          fact.subject,
-          oppositeFact.object,
-          oppositeFact
-        );
+          hasTransitiveRelation(
+            facts,
+            predicate,
+            fact.subject,
+            oppositeFact.object,
+            oppositeFact
+          );
 
         if (!hasIndirectRelation) {
           continue;
@@ -666,6 +1197,8 @@ function checkTransitivePredicates(
 
   return inconsistencies;
 }
+
+
 
 export function checkConsistency(
   extraction: FactExtraction
