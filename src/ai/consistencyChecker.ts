@@ -54,6 +54,65 @@ const inversePredicates: Partial<
   has: "owns",
 };
 
+type TemporalRange = {
+  from?: string;
+  to?: string;
+};
+
+function intersectTemporalRanges(
+  first?: TemporalRange,
+  second?: TemporalRange
+): TemporalRange | null {
+  if (!first && !second) {
+    return {};
+  }
+
+  if (!first) {
+    return {
+      from: second?.from,
+      to: second?.to,
+    };
+  }
+
+  if (!second) {
+    return {
+      from: first.from,
+      to: first.to,
+    };
+  }
+
+  const from =
+    first.from === undefined
+      ? second.from
+      : second.from === undefined
+        ? first.from
+        : first.from > second.from
+          ? first.from
+          : second.from;
+
+  const to =
+    first.to === undefined
+      ? second.to
+      : second.to === undefined
+        ? first.to
+        : first.to < second.to
+          ? first.to
+          : second.to;
+
+  if (
+    from !== undefined &&
+    to !== undefined &&
+    from > to
+  ) {
+    return null;
+  }
+
+  return {
+    from,
+    to,
+  };
+}
+
 /*
  * Symmetrische Beziehungen müssen nicht doppelt
  * angegeben werden, sind aber auch nicht widersprüchlich.
@@ -125,27 +184,6 @@ function getFactKey(fact: Fact): string {
   ].join("|");
 }
 
-/*
- * Erstellt einen Schlüssel für eine symmetrische Beziehung.
- *
- */
-function getSymmetricRelationKey(fact: Fact): string | null {
-  if (fact.object === undefined || fact.object === null) {
-    return null;
-  }
-
-  const subject = normalizeValue(fact.subject);
-  const object = normalizeValue(fact.object);
-
-  const entities = [subject, object].sort();
-
-  return [
-    fact.predicate,
-    entities[0],
-    entities[1],
-  ].join("|");
-}
-
 function getReachableEntities(
   facts: Fact[],
   start: string,
@@ -163,24 +201,11 @@ function getReachableEntities(
 
     reachable.add(current);
 
-    for (const fact of facts) {
-      if (fact.predicate !== predicate) {
-        continue;
-      }
-
-      if (
-        fact.object === undefined ||
-        fact.object === null
-      ) {
-        continue;
-      }
-
-      if (
-        normalizeValue(fact.subject) !== current
-      ) {
-        continue;
-      }
-
+    for (const fact of getOutgoingFacts(
+      facts,
+      predicate,
+      current
+    )) {
       queue.push(
         normalizeValue(fact.object)
       );
@@ -189,6 +214,7 @@ function getReachableEntities(
 
   return reachable;
 }
+
 
 function getOutgoingFacts(
   facts: Fact[],
@@ -260,39 +286,29 @@ function findLocatedInPaths(
 
     visited.add(visitKey);
 
-    for (const fact of facts) {
-      if (
-        fact.predicate !== "located_in" ||
-        fact.object === undefined ||
-        fact.object === null
-      ) {
-        continue;
-      }
+    for (const fact of getOutgoingFacts(
+        facts,
+        "located_in",
+        entity
+      )) {
+        if (
+          path.some(
+            (pathFact) =>
+              getFactKey(pathFact) ===
+              getFactKey(fact)
+          )
+        ) {
+          continue;
+        }
 
-      if (
-        normalizeValue(fact.subject) !== entity
-      ) {
-        continue;
+        queue.push({
+          entity: normalizeValue(fact.object),
+          path: [
+            ...path,
+            fact,
+          ],
+        });
       }
-
-      if (
-        path.some(
-          (pathFact) =>
-            getFactKey(pathFact) ===
-            getFactKey(fact)
-        )
-      ) {
-        continue;
-      }
-
-      queue.push({
-        entity: normalizeValue(fact.object),
-        path: [
-          ...path,
-          fact,
-        ],
-      });
-    }
   }
 
   return paths;
@@ -727,43 +743,6 @@ function checkContradictoryInverseDirections(
   return inconsistencies;
 }
 
-function checkSymmetricPredicates(
-  extraction: FactExtraction
-): Inconsistency[] {
-  /*
-   * Symmetrische Beziehungen erzeugen grundsätzlich
-   * keine Inkonsistenz.
-   *
-   * Wir normalisieren sie hier lediglich, damit wir
-   * später problemlos Duplikate erkennen können.
-   *
-   * Aktuell gibt diese Funktion deshalb noch keine
-   * Inkonsistenzen zurück.
-   */
-  const seen = new Set<string>();
-
-  for (const fact of extraction.facts) {
-    if (
-      !symmetricPredicates.includes(
-        fact.predicate
-      )
-    ) {
-      continue;
-    }
-
-    const key =
-      getSymmetricRelationKey(fact);
-
-    if (!key) {
-      continue;
-    }
-
-    seen.add(key);
-  }
-
-  return [];
-}
-
 function checkSelfRelations(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -803,71 +782,18 @@ function checkSelfRelations(
   return inconsistencies;
 }
 
-
 function getTemporalIntersection(
   currentFrom: string | undefined,
   currentTo: string | undefined,
   fact: Fact
-): {
-  from?: string;
-  to?: string;
-} | null {
-  const factFrom = fact.temporal?.from;
-  const factTo = fact.temporal?.to;
-
-  /*
-   * Bisher und neue Kante haben keine
-   * konkreten Zeitangaben.
-   */
-  if (
-    currentFrom === undefined ||
-    currentTo === undefined
-  ) {
-    if (
-      factFrom === undefined ||
-      factTo === undefined
-    ) {
-      return {};
-    }
-
-    return {
-      from: factFrom,
-      to: factTo,
-    };
-  }
-
-  /*
-   * Die neue Kante hat keinen konkreten Zeitraum.
-   * Der bisherige Zeitraum bleibt bestehen.
-   */
-  if (
-    factFrom === undefined ||
-    factTo === undefined
-  ) {
-    return {
+): TemporalRange | null {
+  return intersectTemporalRanges(
+    {
       from: currentFrom,
       to: currentTo,
-    };
-  }
-
-  const overlapFrom =
-    currentFrom > factFrom
-      ? currentFrom
-      : factFrom;
-
-  const overlapTo =
-    currentTo < factTo
-      ? currentTo
-      : factTo;
-
-  if (overlapFrom > overlapTo) {
-    return null;
-  }
-
-  return {
-    from: overlapFrom,
-    to: overlapTo,
-  };
+    },
+    fact.temporal
+  );
 }
 
 function hasTransitiveRelation(
@@ -909,8 +835,8 @@ function hasTransitiveRelation(
 
     /*
      * Mindestens zwei Kanten sind notwendig,
-     * damit es sich tatsächlich um eine
-     * indirekte/transitive Beziehung handelt.
+     * damit es sich um eine indirekte
+     * transitive Beziehung handelt.
      */
     if (
       entity === normalizedTarget &&
@@ -937,27 +863,11 @@ function hasTransitiveRelation(
 
     visited.add(visitKey);
 
-    for (const fact of facts) {
-      if (
-        fact.predicate !== predicate
-      ) {
-        continue;
-      }
-
-      if (
-        fact.object === undefined ||
-        fact.object === null
-      ) {
-        continue;
-      }
-
-      if (
-        normalizeValue(fact.subject) !==
-        entity
-      ) {
-        continue;
-      }
-
+    for (const fact of getOutgoingFacts(
+      facts,
+      predicate,
+      entity
+    )) {
       /*
        * Derselbe Fact darf innerhalb
        * eines Pfades nicht erneut verwendet werden.
@@ -989,135 +899,11 @@ function hasTransitiveRelation(
 function getTemporalOverlap(
   first: Fact,
   second: Fact
-): {
-  from?: string;
-  to?: string;
-} | null {
-  if (
-    !first.temporal &&
-    !second.temporal
-  ) {
-    return {};
-  }
-
-  if (!first.temporal) {
-    return {
-      from: second.temporal?.from,
-      to: second.temporal?.to,
-    };
-  }
-
-  if (!second.temporal) {
-    return {
-      from: first.temporal.from,
-      to: first.temporal.to,
-    };
-  }
-
-  const firstFrom =
-    first.temporal.from;
-
-  const firstTo =
-    first.temporal.to;
-
-  const secondFrom =
-    second.temporal.from;
-
-  const secondTo =
-    second.temporal.to;
-
-  if (
-    firstFrom === undefined ||
-    firstTo === undefined ||
-    secondFrom === undefined ||
-    secondTo === undefined
-  ) {
-    return {};
-  }
-
-  const from =
-    firstFrom > secondFrom
-      ? firstFrom
-      : secondFrom;
-
-  const to =
-    firstTo < secondTo
-      ? firstTo
-      : secondTo;
-
-  if (from > to) {
-    return null;
-  }
-
-  return {
-    from,
-    to,
-  };
-}
-
-function getTemporalRangeOverlap(
-  first?: {
-    from?: string;
-    to?: string;
-  },
-  second?: {
-    from?: string;
-    to?: string;
-  }
-): {
-  from?: string;
-  to?: string;
-} | null {
-  if (!first && !second) {
-    return {};
-  }
-
-  if (!first) {
-    return {
-      from: second?.from,
-      to: second?.to,
-    };
-  }
-
-  if (!second) {
-    return {
-      from: first.from,
-      to: first.to,
-    };
-  }
-
-  const firstFrom = first.from;
-  const firstTo = first.to;
-  const secondFrom = second.from;
-  const secondTo = second.to;
-
-  if (
-    firstFrom === undefined ||
-    firstTo === undefined ||
-    secondFrom === undefined ||
-    secondTo === undefined
-  ) {
-    return {};
-  }
-
-  const from =
-    firstFrom > secondFrom
-      ? firstFrom
-      : secondFrom;
-
-  const to =
-    firstTo < secondTo
-      ? firstTo
-      : secondTo;
-
-  if (from > to) {
-    return null;
-  }
-
-  return {
-    from,
-    to,
-  };
+): TemporalRange | null {
+  return intersectTemporalRanges(
+    first.temporal,
+    second.temporal
+  );
 }
 
 function hasTransitiveCycle(
@@ -1410,9 +1196,9 @@ export function checkConsistency(
   /*
    * 4. Symmetrische Beziehungen
    */
-  inconsistencies.push(
+/*   inconsistencies.push(
     ...checkSymmetricPredicates(extraction)
-  );
+  ); */
 
   /*
   * 5. Selbstbeziehungen

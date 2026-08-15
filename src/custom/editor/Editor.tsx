@@ -454,7 +454,7 @@ function Toolbar({
       }}
       disabled={analyzing}
       >
-        {analyzing ? "Analysiere..." : "Text analysieren"}
+        {analyzing ? "Analyzing..." : "Analyze Text"}
       </button>
     </div>
   );
