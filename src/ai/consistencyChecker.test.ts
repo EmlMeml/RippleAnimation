@@ -590,4 +590,507 @@ it("erkennt unterschiedliche Orte zum gleichen Zeitpunkt als Widerspruch", () =>
   expect(result).toHaveLength(1);
 });
 
+it("erkennt parent_of und child_of als inverse Beziehung", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      { id: "anna", name: "Anna", type: "person" },
+      { id: "thomas", name: "Thomas", type: "person" },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "parent_of",
+        object: "thomas",
+      },
+      {
+        subject: "thomas",
+        predicate: "child_of",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt owns und has als inverse Beziehung", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      { id: "anna", name: "Anna", type: "person" },
+      { id: "car", name: "Auto", type: "object" },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "owns",
+        object: "car",
+      },
+      {
+        subject: "car",
+        predicate: "has",
+        object: "anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+
+it("erkennt unterschiedliche lives_in Zeiträume als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "am 14.08.",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "am 15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt unterschiedliche lives_in Orte zum gleichen Zeitpunkt als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt sich überschneidende lives_in Zeiträume als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "14.08. bis 16.08.",
+          from: "2026-08-14",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt einen gemeinsamen Grenztag als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "14.08. bis 15.08.",
+          from: "2026-08-14",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "15.08. bis 16.08.",
+          from: "2026-08-15",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt sich überschneidende located_in Zeiträume als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "14.08. bis 16.08.",
+          from: "2026-08-14",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          text: "15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt getrennte located_in Zeiträume als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          text: "14.08.",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          text: "15.08.",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt unterschiedliche Arbeitgeber ohne zeitlichen Kontext als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_a",
+      },
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_b",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt unterschiedliche Arbeitgeber zu unterschiedlichen Zeitpunkten als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_a",
+        temporal: {
+          text: "2024",
+          from: "2024-01-01",
+          to: "2024-12-31",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_b",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt überschneidende unterschiedliche Arbeitgeber als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_a",
+        temporal: {
+          text: "2024 bis 2026",
+          from: "2024-01-01",
+          to: "2026-12-31",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "works_at",
+        object: "company_b",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+
+it("erkennt zeitlich getrennte opposing predicates als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "thomas",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "thomas",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt zeitlich getrennte inverse Richtungen als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "parent_of",
+        object: "thomas",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "child_of",
+        object: "thomas",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  console.log(result);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt überlappende inverse Richtungen als Widerspruch", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "parent_of",
+        object: "thomas",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "child_of",
+        object: "thomas",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt zeitlich getrennte inverse Richtungen als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "parent_of",
+        object: "thomas",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "child_of",
+        object: "thomas",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+// Tests for transitive Relations
+it("erkennt zeitlich getrennten transitiven Konflikt als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "heute",
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "morgen",
+          from: "2026-08-15",
+          to: "2026-08-15",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
 });

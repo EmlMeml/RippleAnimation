@@ -3,6 +3,8 @@ import type {
   FactExtraction,
   Predicate,
 } from "../types/facts";
+import { temporalRangesOverlap } from "./temporalOverlap";
+
 
 export interface Inconsistency {
   type: "conflicting_fact";
@@ -107,6 +109,21 @@ function getFactValue(fact: Fact): string {
   return normalizeValue(fact.value);
 }
 
+function getFactKey(fact: Fact): string {
+  const value = getFactValue(fact);
+
+  const from = fact.temporal?.from ?? "";
+  const to = fact.temporal?.to ?? "";
+
+  return [
+    normalizeValue(fact.subject),
+    fact.predicate,
+    value,
+    from,
+    to,
+  ].join("|");
+}
+
 /*
  * Erstellt einen Schlüssel für eine symmetrische Beziehung.
  *
@@ -127,61 +144,6 @@ function getSymmetricRelationKey(fact: Fact): string | null {
     entities[1],
   ].join("|");
 }
- 
-
-function temporalContextsOverlap(
-  factA: Fact,
-  factB: Fact
-): boolean {
-  // Wenn mindestens einer der Facts keinen zeitlichen
-  // Kontext besitzt, behandeln wir ihn als zeitlich
-  // unbeschränkt.
-  if (!factA.temporal || !factB.temporal) {
-    return true;
-  }
-
-  const fromA =
-    factA.temporal.from ??
-    factA.temporal.to;
-
-  const toA =
-    factA.temporal.to ??
-    factA.temporal.from;
-
-  const fromB =
-    factB.temporal.from ??
-    factB.temporal.to;
-
-  const toB =
-    factB.temporal.to ??
-    factB.temporal.from;
-
-  // Falls kein normalisierter Zeitraum vorhanden ist,
-  // können wir keine zeitliche Trennung feststellen.
-  if (!fromA || !toA || !fromB || !toB) {
-    return true;
-  }
-
-  return (
-    fromA <= toB &&
-    fromB <= toA
-  );
-}
-
-function getFactKey(fact: Fact): string {
-  const value = getFactValue(fact);
-
-  const from = fact.temporal?.from ?? "";
-  const to = fact.temporal?.to ?? "";
-
-  return [
-    normalizeValue(fact.subject),
-    fact.predicate,
-    value,
-    from,
-    to,
-  ].join("|");
-}
 
 function checkExclusiveFacts(
   extraction: FactExtraction
@@ -189,44 +151,105 @@ function checkExclusiveFacts(
   const inconsistencies: Inconsistency[] = [];
 
   for (const predicate of exclusivePredicates) {
+    /*
+     * Alle Facts für das aktuell exklusive Prädikat.
+     */
     const facts = extraction.facts.filter(
       (fact) => fact.predicate === predicate
     );
 
-    const grouped = new Map<string, Fact[]>();
+    /*
+     * Identische Facts entfernen.
+     *
+     * Beispiel:
+     *
+     * Anna lives_in Munich
+     * Anna lives_in Munich
+     * Anna lives_in Berlin
+     *
+     * Die beiden Munich-Facts werden zu einem Fact.
+     */
+    const uniqueFacts = Array.from(
+      new Map(
+        facts.map((fact) => [
+          getFactKey(fact),
+          fact,
+        ])
+      ).values()
+    );
 
-    for (const fact of facts) {
-      const subject = normalizeValue(fact.subject);
+    /*
+     * Facts nach Subjekt gruppieren.
+     *
+     * Nur Facts desselben Subjekts können
+     * miteinander in Konflikt stehen.
+     */
+    const grouped = new Map<
+      string,
+      Fact[]
+    >();
+
+    for (const fact of uniqueFacts) {
+      const subject =
+        normalizeValue(fact.subject);
 
       const existing =
         grouped.get(subject) ?? [];
 
       existing.push(fact);
-      grouped.set(subject, existing);
+
+      grouped.set(
+        subject,
+        existing
+      );
     }
 
-    for (const [subject, subjectFacts] of grouped) {
-        const uniqueFacts = Array.from(
-          new Map(
-            subjectFacts.map((fact) => [
-              getFactKey(fact),
-              fact,
-            ])
-          ).values()
-        );
-      for (let i = 0; i < uniqueFacts.length; i++) {
-        for (let j = i + 1; j < uniqueFacts.length; j++) {
-          const factA = uniqueFacts[i];
-          const factB = uniqueFacts[j];
+    /*
+     * Innerhalb jeder Subjektgruppe werden
+     * jeweils zwei Facts miteinander verglichen.
+     */
+    for (const [
+      subject,
+      subjectFacts,
+    ] of grouped) {
+      for (
+        let i = 0;
+        i < subjectFacts.length;
+        i++
+      ) {
+        for (
+          let j = i + 1;
+          j < subjectFacts.length;
+          j++
+        ) {
+          const factA = subjectFacts[i];
+          const factB = subjectFacts[j];
 
-          const valueA = getFactValue(factA);
-          const valueB = getFactValue(factB);
-
-          if (valueA === valueB) {
+          /*
+           * Gleicher Wert ist kein Widerspruch.
+           *
+           * Beispiel:
+           * Anna lebt in München.
+           * Anna lebt heute in München.
+           */
+          if (
+            getFactValue(factA) ===
+            getFactValue(factB)
+          ) {
             continue;
           }
 
-          if (!temporalContextsOverlap(factA, factB)) {
+          /*
+           * Unterschiedliche Werte sind nur dann
+           * widersprüchlich, wenn sich die zeitlichen
+           * Gültigkeitsbereiche überschneiden.
+           */
+          if (
+            !temporalRangesOverlap(
+              factA,
+              factB
+            )
+          ) {
             continue;
           }
 
@@ -234,7 +257,10 @@ function checkExclusiveFacts(
             type: "conflicting_fact",
             subject,
             predicate,
-            facts: [factA, factB],
+            facts: [
+              factA,
+              factB,
+            ],
             message:
               `${subject} hat widersprüchliche Angaben für ` +
               `"${predicate}".`,
@@ -246,6 +272,7 @@ function checkExclusiveFacts(
 
   return inconsistencies;
 }
+
 function checkOpposingPredicates(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -277,9 +304,12 @@ function checkOpposingPredicates(
           normalizeValue(factB.subject) ===
             normalizeValue(factA.subject) &&
           normalizeValue(factB.object) ===
-            normalizeValue(factA.object)
+            normalizeValue(factA.object) &&
+          temporalRangesOverlap(
+            factA,
+            factB
+          )
       );
-
       if (!matchingFact) {
         continue;
       }
@@ -303,27 +333,17 @@ function checkOpposingPredicates(
   return inconsistencies;
 }
 
-function checkInversePredicates(
+function checkContradictoryInverseDirections(
   extraction: FactExtraction
 ): Inconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
-  /*
-   * Wir prüfen nur Fälle, bei denen dasselbe Subjekt
-   * mit demselben Objekt beide Richtungen verwendet.
-   *
-   */
   for (const [
     predicateA,
     predicateB,
   ] of Object.entries(inversePredicates) as Array<
     [Predicate, Predicate]
   >) {
-    /*
-     * Damit wir nicht denselben Paarvergleich zweimal
-     * durchführen
-     *
-     */
     if (predicateA > predicateB) {
       continue;
     }
@@ -349,7 +369,11 @@ function checkInversePredicates(
           normalizeValue(factB.subject) ===
             normalizeValue(factA.subject) &&
           normalizeValue(factB.object) ===
-            normalizeValue(factA.object)
+            normalizeValue(factA.object) &&
+          temporalRangesOverlap(
+            factA,
+            factB
+          )
       );
 
       if (!matchingFact) {
@@ -359,15 +383,15 @@ function checkInversePredicates(
       inconsistencies.push({
         type: "conflicting_fact",
         subject: factA.subject,
-        predicate: predicateA,
+        predicate: factA.predicate,
         facts: [
           factA,
           matchingFact,
         ],
         message:
-          `${factA.subject} hat widersprüchliche ` +
-          `Beziehungen: "${predicateA}" und ` +
-          `"${predicateB}".`,
+          `${factA.subject} kann nicht gleichzeitig ` +
+          `"${predicateA}" und "${predicateB}" ` +
+          `zu ${factA.object} sein.`,
       });
     }
   }
@@ -455,7 +479,8 @@ function hasTransitiveRelation(
   facts: Fact[],
   predicate: Predicate,
   start: string,
-  target: string
+  target: string,
+  referenceFact: Fact
 ): boolean {
   const normalizedStart = normalizeValue(start);
   const normalizedTarget = normalizeValue(target);
@@ -463,10 +488,12 @@ function hasTransitiveRelation(
   const queue: Array<{
     entity: string;
     depth: number;
+    path: Fact[];
   }> = [
     {
       entity: normalizedStart,
       depth: 0,
+      path: [],
     },
   ];
 
@@ -482,17 +509,27 @@ function hasTransitiveRelation(
     const {
       entity,
       depth,
+      path,
     } = current;
 
-    /*
-     * Eine transitive Beziehung braucht
-     * mindestens zwei Kanten.
-     */
     if (
       entity === normalizedTarget &&
       depth >= 2
     ) {
-      return true;
+      /*
+       * Der gesamte transitive Pfad muss zeitlich
+       * mit dem Referenz-Fact überlappen.
+       */
+      const pathIsRelevant = path.every((fact) =>
+        temporalRangesOverlap(
+          fact,
+          referenceFact
+        )
+      );
+
+      if (pathIsRelevant) {
+        return true;
+      }
     }
 
     const visitKey = `${entity}|${depth}`;
@@ -521,11 +558,29 @@ function hasTransitiveRelation(
         continue;
       }
 
+      /*
+       * Eine Kante, die zeitlich nicht mit dem
+       * Referenz-Fact zusammenfällt, kann nicht
+       * Teil dieses Konfliktpfades sein.
+       */
+      if (
+        !temporalRangesOverlap(
+          fact,
+          referenceFact
+        )
+      ) {
+        continue;
+      }
+
       const next = normalizeValue(fact.object);
 
       queue.push({
         entity: next,
         depth: depth + 1,
+        path: [
+          ...path,
+          fact,
+        ],
       });
     }
   }
@@ -580,12 +635,13 @@ function checkTransitivePredicates(
         }
 
         const hasIndirectRelation =
-          hasTransitiveRelation(
-            facts,
-            predicate,
-            fact.subject,
-            oppositeFact.object
-          );
+        hasTransitiveRelation(
+          facts,
+          predicate,
+          fact.subject,
+          oppositeFact.object,
+          oppositeFact
+        );
 
         if (!hasIndirectRelation) {
           continue;
@@ -631,11 +687,11 @@ export function checkConsistency(
   );
 
   /*
-   * 3. Inverse Beziehungen
-   */
+  * 3 Widersprüchliche inverse Richtung
+  */
   inconsistencies.push(
-    ...checkInversePredicates(extraction)
-  );
+    ...checkContradictoryInverseDirections(extraction)
+  );  
 
   /*
    * 4. Symmetrische Beziehungen
