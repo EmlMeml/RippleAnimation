@@ -1,7 +1,39 @@
-import type { FactExtraction } from "../types/facts";
+import type { Fact, FactExtraction } from "../types/facts";
 import type { StoryContext } from "../types/story";
 import { askAI } from "./../ai/api";
 import { normalizeTemporal } from "./temporalNormalizer";
+
+function getFactKey(fact: Fact): string {
+  return [
+    fact.subject.trim().toLowerCase(),
+    fact.predicate,
+    fact.value !== undefined
+      ? String(fact.value).trim().toLowerCase()
+      : "",
+    fact.object !== undefined && fact.object !== null
+      ? String(fact.object).trim().toLowerCase()
+      : "",
+    fact.temporal?.text?.trim().toLowerCase() ?? "",
+    fact.temporal?.from ?? "",
+    fact.temporal?.to ?? "",
+  ].join("|");
+}
+
+function deduplicateFacts(
+  facts: Fact[]
+): Fact[] {
+  const unique = new Map<string, Fact>();
+
+  for (const fact of facts) {
+    const key = getFactKey(fact);
+
+    if (!unique.has(key)) {
+      unique.set(key, fact);
+    }
+  }
+
+  return Array.from(unique.values());
+}
 
 export async function extractFacts(
   text: string,
@@ -81,6 +113,125 @@ Allowed predicates:
 - participates_in
 - younger_than
 - older_than
+
+PREDICATE SELECTION
+
+Use predicates according to the exact meaning of the text.
+
+LIVING LOCATION:
+
+If the text says that a person lives in a place, always use:
+
+"lives_in"
+
+Examples:
+
+"Anna lebt in München."
+→
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "munich"
+}
+
+"Anna wohnt in Berlin."
+→
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "berlin"
+}
+
+Do NOT use "located_in" for a person's residence.
+
+Use "located_in" only when the text explicitly describes the
+physical/location relationship of an entity, for example:
+
+"Das Krankenhaus befindet sich in München."
+→
+{
+  "subject": "hospital",
+  "predicate": "located_in",
+  "object": "munich"
+}
+
+PREDICATE RULE FOR RESIDENCE
+
+If a person lives, resides, or lives at a place,
+always use "lives_in".
+
+Examples:
+
+"Anna lebt in München."
+→ lives_in
+
+"Anna wohnt in Berlin."
+→ lives_in
+
+"Anna resides in Hamburg."
+→ lives_in
+
+Never use "located_in" for a person's residence.
+
+"located_in" should only be used for explicit location
+relationships of entities such as buildings, objects,
+organizations, or places.
+
+TEMPORAL FACTS
+
+If a temporal expression modifies a fact, attach it to that fact.
+
+Example:
+
+"Anna lebt in München. Two years later lebt Anna in Berlin."
+
+Return:
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "munich"
+}
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "berlin",
+  "temporal": {
+    "text": "Two years later"
+  }
+}
+
+TEMPORAL EXPRESSIONS
+
+If a fact is explicitly introduced by a temporal expression,
+attach that temporal expression to the fact.
+
+Example:
+
+"Anna lebt in München. Two years later lebt Anna in Berlin."
+
+Return:
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "munich"
+}
+
+and:
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "berlin",
+  "temporal": {
+    "text": "Two years later"
+  }
+}
+
+Do not replace "lives_in" with "located_in".
+Do not omit the temporal expression.
 
 AGE
 
@@ -258,21 +409,125 @@ Do not return Markdown.
 
 Return ONLY JSON.
 
+COMPLETENESS
+
+Extract EVERY explicitly stated fact from the text.
+
+Do not omit facts.
+
+Do not merge facts.
+
+Do not overwrite facts.
+
+Do not deduplicate facts merely because they have the same
+subject and predicate.
+
+Multiple facts with the same subject and predicate are allowed
+and MUST be preserved.
+
+For example:
+
+"Anna lebt in München. Später lebt Anna in Berlin."
+
+MUST produce TWO separate facts:
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "munich"
+}
+
+and:
+
+{
+  "subject": "anna",
+  "predicate": "lives_in",
+  "object": "berlin"
+}
+
+If one sentence explicitly expresses multiple facts,
+create one fact for EACH explicitly stated fact.
+
+For example:
+
+"Thomas ist Annas Bruder und jünger als Anna."
+
+MUST produce TWO separate facts:
+
+{
+  "subject": "thomas",
+  "predicate": "sibling_of",
+  "object": "anna"
+}
+
+and:
+
+{
+  "subject": "thomas",
+  "predicate": "younger_than",
+  "object": "anna"
+}
+
+Never remove a fact because another fact about the same
+subject already exists.
+
+RELATIVE TIME EXPRESSIONS
+
+Extract relative temporal expressions exactly as written.
+
+Examples:
+
+"Two years later Anna moved to Berlin."
+
+The fact must contain:
+
+"temporal": {
+  "text": "Two years later"
+}
+
+Other examples include:
+
+"one year later"
+"two years later"
+"three months later"
+"two weeks later"
+"five days later"
+
+Preserve the original temporal expression exactly as written.
+Do not calculate the date yourself.
+
 TEXT:
 
 ${text}
 `;
   const extraction = await askAI(prompt);
 
+  const normalizedFacts = extraction.facts.map(
+    (fact) => ({
+      ...fact,
+      temporal: normalizeTemporal(
+        fact.temporal,
+        context
+      ),
+    })
+  );
+
+  console.log(
+    "NORMALIZED FACTS:",
+    JSON.stringify(normalizedFacts, null, 2)
+  );
+
+  console.log(
+    "DEDUPLICATED FACTS:",
+    JSON.stringify(
+      deduplicateFacts(normalizedFacts),
+      null,
+      2
+    )
+  );
 
   return {
   ...extraction,
-  facts: extraction.facts.map((fact) => ({
-    ...fact,
-    temporal: normalizeTemporal(
-      fact.temporal,
-      context
-    ),
-  })),
+  facts: deduplicateFacts(normalizedFacts),
 };
 }

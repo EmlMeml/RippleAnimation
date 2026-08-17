@@ -603,6 +603,11 @@ function deserialize(
       const foundInconsistencies =
         checkConsistency(result);
 
+      console.log(
+        "INCONSISTENCIES:",
+        JSON.stringify(foundInconsistencies, null, 2)
+      );
+
       setInconsistencies(foundInconsistencies);
 
     } catch (error) {
