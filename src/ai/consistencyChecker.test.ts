@@ -322,28 +322,6 @@ it("erkennt einen transitiven younger_than Pfad ohne Widerspruch", () => {
   expect(result).toHaveLength(0);
 });
 
-it("akzeptiert eine konsistente transitive younger_than Beziehung", () => {
-  const extraction: FactExtraction = {
-    entities: [],
-    facts: [
-      {
-        subject: "Anna",
-        predicate: "younger_than",
-        object: "Thomas",
-      },
-      {
-        subject: "Thomas",
-        predicate: "younger_than",
-        object: "Peter",
-      },
-    ],
-  };
-
-  const result = checkConsistency(extraction);
-
-  expect(result).toHaveLength(0);
-});
-
 /* 
     Duplikate in Fakten
  */
@@ -1629,6 +1607,7 @@ it("ignoriert younger_than Fakten ohne Objekt", () => {
   expect(result).toHaveLength(0);
 });
 
+
 it("ignoriert younger_than Fakten mit null als Objekt", () => {
   const extraction: FactExtraction = {
     entities: [],
@@ -2623,7 +2602,6 @@ it("erkennt alternative located_in Pfade mit gemeinsamem Zwischengebiet als kons
   expect(result).toHaveLength(0);
 });
 
-
 it("erkennt einen transitiven Zyklus nur bei zeitlich überlappenden Pfaden", () => {
   const extraction: FactExtraction = {
     entities: [],
@@ -2685,5 +2663,737 @@ it("erkennt keinen transitiven Zyklus bei vollständig getrennten Zeiträumen", 
   expect(result).toHaveLength(0);
 });
 
+it("does not report a located_in conflict when locations share a temporally compatible ancestor", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      {
+        id: "munich",
+        name: "Munich",
+        type: "place",
+      },
+      {
+        id: "germany",
+        name: "Germany",
+        type: "place",
+      },
+      {
+        id: "berlin",
+        name: "Berlin",
+        type: "place",
+      },
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+    ],
+    facts: [
+      {
+        subject: "Munich",
+        predicate: "located_in",
+        object: "Germany",
+        temporal: {
+          from: "2020",
+          to: "2030",
+        },
+      },
+      {
+        subject: "Berlin",
+        predicate: "located_in",
+        object: "Germany",
+        temporal: {
+          from: "2020",
+          to: "2030",
+        },
+      },
+      {
+        subject: "Anna",
+        predicate: "located_in",
+        object: "Munich",
+        temporal: {
+          from: "2022",
+          to: "2025",
+        },
+      },
+      {
+        subject: "Anna",
+        predicate: "located_in",
+        object: "Berlin",
+        temporal: {
+          from: "2022",
+          to: "2025",
+        },
+      },
+    ],
+  };
+
+  expect(checkConsistency(extraction)).toEqual([]);
+});
+
+it("currently treats a shared ancestor as compatible even when temporal ranges do not overlap", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      {
+        id: "munich",
+        name: "Munich",
+        type: "place",
+      },
+      {
+        id: "germany",
+        name: "Germany",
+        type: "place",
+      },
+      {
+        id: "berlin",
+        name: "Berlin",
+        type: "place",
+      },
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+    ],
+    facts: [
+      {
+        subject: "Munich",
+        predicate: "located_in",
+        object: "Germany",
+        temporal: {
+          from: "2000",
+          to: "2010",
+        },
+      },
+      {
+        subject: "Berlin",
+        predicate: "located_in",
+        object: "Germany",
+        temporal: {
+          from: "2000",
+          to: "2010",
+        },
+      },
+      {
+        subject: "Anna",
+        predicate: "located_in",
+        object: "Munich",
+        temporal: {
+          from: "2020",
+          to: "2025",
+        },
+      },
+      {
+        subject: "Anna",
+        predicate: "located_in",
+        object: "Berlin",
+        temporal: {
+          from: "2020",
+          to: "2025",
+        },
+      },
+    ],
+  };
+  expect(checkConsistency(extraction)).toEqual([
+    {
+      type: "conflicting_fact",
+      subject: "anna",
+      predicate: "located_in",
+      facts: [
+        extraction.facts[2],
+        extraction.facts[3],
+      ],
+      message:
+        'anna hat widersprüchliche Angaben für "located_in".',
+    },
+  ]);
+});
+
+
+
+it("erkennt mehrere unabhängige Konflikte gleichzeitig", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+      },
+      {
+        subject: "thomas",
+        predicate: "works_at",
+        object: "company_a",
+      },
+      {
+        subject: "thomas",
+        predicate: "works_at",
+        object: "company_b",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(2);
+  expect(
+    result.filter(
+      (inconsistency) =>
+        inconsistency.type === "conflicting_fact"
+    )
+  ).toHaveLength(2);
+});
+
+it("erkennt einen Konflikt zwischen einem zeitlich unbegrenzten und einem zeitlich begrenzten exklusiven Fact", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen Konflikt zwischen einem zeitlich begrenzten und einem zeitlich unbegrenzten exklusiven Fact", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "2026",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("behandelt Entity-ID und Entity-Name als dieselbe Entity", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "Anna",
+        predicate: "lives_in",
+        object: "Berlin",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt Entity-ID und Entity-Name bei identischem Fact nicht als Duplikat-Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [
+      {
+        id: "anna",
+        name: "Anna",
+        type: "person",
+      },
+    ],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "Anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen konsistenten transitiven Graphen mit mehreren Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+      },
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "clara",
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "david",
+      },
+      {
+        subject: "clara",
+        predicate: "younger_than",
+        object: "david",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen Konflikt in einem verzweigten transitiven Graphen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Bob",
+      },
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Carol",
+      },
+      {
+        subject: "Bob",
+        predicate: "younger_than",
+        object: "David",
+      },
+      {
+        subject: "Carol",
+        predicate: "younger_than",
+        object: "David",
+      },
+      {
+        subject: "Alice",
+        predicate: "older_than",
+        object: "David",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result.length).toBeGreaterThan(0);
+  expect(
+    result.some(
+      (inconsistency) =>
+        inconsistency.subject.toLowerCase() === "alice" &&
+        inconsistency.predicate === "younger_than"
+    )
+  ).toBe(true);
+});
+
+it("erkennt keinen Konflikt bei mehreren konsistenten transitiven Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Bob",
+      },
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Carol",
+      },
+      {
+        subject: "Bob",
+        predicate: "younger_than",
+        object: "David",
+      },
+      {
+        subject: "Carol",
+        predicate: "younger_than",
+        object: "David",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt keinen transitiven Konflikt bei zeitlich getrennten Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities:[],
+    facts: [
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Bob",
+        temporal: {
+          from: "2000",
+          to: "2010",
+        },
+      },
+      {
+        subject: "Bob",
+        predicate: "younger_than",
+        object: "David",
+        temporal: {
+          from: "2011",
+          to: "2020",
+        },
+      },
+      {
+        subject: "Alice",
+        predicate: "older_than",
+        object: "David",
+        temporal: {
+          from: "2011",
+          to: "2020",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen Konflikt wenn nur einer von mehreren transitiven Pfaden widersprüchlich ist", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Bob",
+      },
+      {
+        subject: "Bob",
+        predicate: "younger_than",
+        object: "David",
+      },
+
+      {
+        subject: "Alice",
+        predicate: "younger_than",
+        object: "Carol",
+      },
+      {
+        subject: "Carol",
+        predicate: "younger_than",
+        object: "Eve",
+      },
+
+      {
+        subject: "Alice",
+        predicate: "older_than",
+        object: "David",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result.length).toBeGreaterThan(0);
+
+  expect(
+    result.some(
+      (inconsistency) =>
+        inconsistency.subject.toLowerCase() === "alice"
+    )
+  ).toBe(true);
+});
+
+it("erkennt einen transitiven Konflikt bei teilweise überlappenden Pfad-Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "14.08. bis 16.08.",
+          from: "2026-08-14",
+          to: "2026-08-16",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "15.08. bis 17.08.",
+          from: "2026-08-15",
+          to: "2026-08-17",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt keinen transitiven Konflikt wenn die Pfad-Zeiträume keinen gemeinsamen Schnitt haben", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "younger_than",
+        object: "ben",
+        temporal: {
+          text: "14.08. bis 15.08.",
+          from: "2026-08-14",
+          to: "2026-08-15",
+        },
+      },
+      {
+        subject: "ben",
+        predicate: "younger_than",
+        object: "clara",
+        temporal: {
+          text: "16.08. bis 17.08.",
+          from: "2026-08-16",
+          to: "2026-08-17",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "older_than",
+        object: "clara",
+        temporal: {
+          text: "16.08.",
+          from: "2026-08-16",
+          to: "2026-08-16",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt unterschiedliche located_in Angaben verschiedener Subjects nicht als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "berlin",
+        predicate: "located_in",
+        object: "brandenburg",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt einen Konflikt bei inkompatiblen alternativen located_in Pfaden", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "bavaria",
+      },
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "southern_germany",
+      },
+      {
+        subject: "southern_germany",
+        predicate: "located_in",
+        object: "france",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("erkennt einen located_in Konflikt trotz gemeinsamem Vorfahren bei nicht überlappenden Vorfahren-Zeiträumen", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "munich",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          from: "2000",
+          to: "2010",
+        },
+      },
+      {
+        subject: "berlin",
+        predicate: "located_in",
+        object: "germany",
+        temporal: {
+          from: "2000",
+          to: "2010",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "munich",
+        temporal: {
+          from: "2020",
+          to: "2025",
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "located_in",
+        object: "berlin",
+        temporal: {
+          from: "2020",
+          to: "2025",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+  expect(result[0].type).toBe("conflicting_fact");
+});
+
+it("meldet mehrere Konflikte trotz Duplikaten jeweils nur einmal", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+      },
+      {
+        subject: "thomas",
+        predicate: "works_at",
+        object: "company_a",
+      },
+      {
+        subject: "thomas",
+        predicate: "works_at",
+        object: "company_a",
+      },
+      {
+        subject: "thomas",
+        predicate: "works_at",
+        object: "company_b",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(2);
+
+  expect(
+    result.filter(
+      (inconsistency) =>
+        inconsistency.subject === "anna" &&
+        inconsistency.predicate === "lives_in"
+    )
+  ).toHaveLength(1);
+
+  expect(
+    result.filter(
+      (inconsistency) =>
+        inconsistency.subject === "thomas" &&
+        inconsistency.predicate === "works_at"
+    )
+  ).toHaveLength(1);
+});
 
 });

@@ -184,37 +184,20 @@ function getFactKey(fact: Fact): string {
   ].join("|");
 }
 
-function getReachableEntities(
-  facts: Fact[],
-  start: string,
-  predicate: Predicate
-): Set<string> {
-  const reachable = new Set<string>();
-  const queue = [normalizeValue(start)];
+function getInconsistencyKey(
+  inconsistency: Inconsistency
+): string {
+  const factKeys = inconsistency.facts
+    .map(getFactKey)
+    .sort();
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-
-    if (reachable.has(current)) {
-      continue;
-    }
-
-    reachable.add(current);
-
-    for (const fact of getOutgoingFacts(
-      facts,
-      predicate,
-      current
-    )) {
-      queue.push(
-        normalizeValue(fact.object)
-      );
-    }
-  }
-
-  return reachable;
+  return [
+    inconsistency.type,
+    normalizeValue(inconsistency.subject),
+    normalizeValue(inconsistency.predicate),
+    ...factKeys,
+  ].join("|");
 }
-
 
 function getOutgoingFacts(
   facts: Fact[],
@@ -232,86 +215,6 @@ function getOutgoingFacts(
       normalizeValue(fact.subject) ===
         normalizedSubject
   );
-}
-
-function findLocatedInPaths(
-  facts: Fact[],
-  start: string,
-  target: string
-): Fact[][] {
-  const normalizedStart = normalizeValue(start);
-  const normalizedTarget = normalizeValue(target);
-
-  type QueueItem = {
-    entity: string;
-    path: Fact[];
-  };
-
-  const queue: QueueItem[] = [
-    {
-      entity: normalizedStart,
-      path: [],
-    },
-  ];
-
-  const paths: Fact[][] = [];
-
-  const visited = new Set<string>();
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-
-    if (!current) {
-      continue;
-    }
-
-    const {
-      entity,
-      path,
-    } = current;
-
-    if (entity === normalizedTarget) {
-      paths.push(path);
-      continue;
-    }
-
-    const visitKey = [
-      entity,
-      ...path.map(getFactKey),
-    ].join("|");
-
-    if (visited.has(visitKey)) {
-      continue;
-    }
-
-    visited.add(visitKey);
-
-    for (const fact of getOutgoingFacts(
-        facts,
-        "located_in",
-        entity
-      )) {
-        if (
-          path.some(
-            (pathFact) =>
-              getFactKey(pathFact) ===
-              getFactKey(fact)
-          )
-        ) {
-          continue;
-        }
-
-        queue.push({
-          entity: normalizeValue(fact.object),
-          path: [
-            ...path,
-            fact,
-          ],
-        });
-      }
-  }
-
-  return paths;
 }
 
 function isPathTemporallyCompatible(
@@ -335,20 +238,38 @@ function isHierarchicalLocatedIn(
   to: string,
   referenceFacts: Fact[]
 ): boolean {
-  const normalizedFrom = normalizeValue(from);
-  const normalizedTo = normalizeValue(to);
+  const normalizedFrom =
+    normalizeValue(from);
+
+  const normalizedTo =
+    normalizeValue(to);
 
   if (normalizedFrom === normalizedTo) {
     return true;
   }
 
-  const paths = findLocatedInPaths(
-    facts,
-    normalizedFrom,
-    normalizedTo
-  );
+  const paths =
+    findLocatedInPathsFrom(
+      facts,
+      normalizedFrom
+    );
 
-  return paths.some((path) =>
+  const matchingPaths =
+    paths.filter((path) => {
+      if (path.length === 0) {
+        return false;
+      }
+
+      const lastFact =
+        path[path.length - 1];
+
+      return (
+        normalizeValue(lastFact.object) ===
+        normalizedTo
+      );
+    });
+
+  return matchingPaths.some((path) =>
     isPathTemporallyCompatible(
       path,
       referenceFacts
@@ -357,34 +278,164 @@ function isHierarchicalLocatedIn(
 }
 
 
-function hasCommonDescendant(
+type FactPathQueueItem = {
+  entity: string;
+  path: Fact[];
+};
+
+function findLocatedInPathsFrom(
+  facts: Fact[],
+  start: string
+): Fact[][] {
+
+  const queue: FactPathQueueItem[] = [
+    {
+      entity: normalizeValue(start),
+      path: [],
+    },
+  ];
+
+  const paths: Fact[][] = [];
+
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current) {
+      continue;
+    }
+
+    const {
+      entity,
+      path,
+    } = current;
+
+    const visitKey = [
+      entity,
+      ...path.map(getFactKey),
+    ].join("|");
+
+    if (visited.has(visitKey)) {
+      continue;
+    }
+
+    visited.add(visitKey);
+
+    for (const fact of getOutgoingFacts(
+      facts,
+      "located_in",
+      entity
+    )) {
+      if (pathContainsFact(path, fact)) {
+        continue;
+      }
+
+      const nextPath = [
+        ...path,
+        fact,
+      ];
+
+      paths.push(nextPath);
+
+      queue.push({
+        entity: normalizeValue(fact.object),
+        path: nextPath,
+      });
+    }
+  }
+
+  return paths;
+}
+
+function hasCommonLocatedInAncestor(
   facts: Fact[],
   first: string,
-  second: string
+  second: string,
+  referenceFacts: Fact[]
 ): boolean {
-  const firstReachable =
-    getReachableEntities(
-      facts,
-      first,
-      "located_in"
-    );
+  const firstPaths = findLocatedInPathsFrom(
+    facts,
+    first
+  );
 
-  const secondReachable =
-    getReachableEntities(
-      facts,
-      second,
-      "located_in"
-    );
+  const secondPaths = findLocatedInPathsFrom(
+    facts,
+    second
+  );
 
-  for (const entity of firstReachable) {
-    if (secondReachable.has(entity)) {
+  const normalizedFirst =
+    normalizeValue(first);
+
+  const normalizedSecond =
+    normalizeValue(second);
+
+  for (const firstPath of firstPaths) {
+    if (firstPath.length === 0) {
+      continue;
+    }
+
+    const firstAncestor =
+      normalizeValue(
+        firstPath[firstPath.length - 1].object
+      );
+
+    if (
+      firstAncestor === normalizedFirst ||
+      firstAncestor === normalizedSecond
+    ) {
+      continue;
+    }
+
+    if (
+      !isPathTemporallyCompatible(
+        firstPath,
+        referenceFacts
+      )
+    ) {
+      continue;
+    }
+
+    for (const secondPath of secondPaths) {
+      if (secondPath.length === 0) {
+        continue;
+      }
+
+      const secondAncestor =
+        normalizeValue(
+          secondPath[
+            secondPath.length - 1
+          ].object
+        );
+
+      if (
+        secondAncestor !== firstAncestor
+      ) {
+        continue;
+      }
+
+      if (
+        secondAncestor === normalizedFirst ||
+        secondAncestor === normalizedSecond
+      ) {
+        continue;
+      }
+
+      if (
+        !isPathTemporallyCompatible(
+          secondPath,
+          referenceFacts
+        )
+      ) {
+        continue;
+      }
+
       return true;
     }
   }
 
   return false;
 }
-
 
 function areLocatedInValuesCompatible(
   facts: Fact[],
@@ -421,10 +472,11 @@ function areLocatedInValuesCompatible(
   }
 
   if (
-    hasCommonDescendant(
-      facts,
-      valueA,
-      valueB
+    hasCommonLocatedInAncestor(
+    facts,
+    valueA,
+    valueB,
+    [factA, factB]
     )
   ) {
     return true;
@@ -578,6 +630,28 @@ function checkExclusiveFacts(
   return inconsistencies;
 }
 
+function areFactsTemporallyCompatible(
+  first: Fact,
+  second: Fact
+): boolean {
+  if (
+    first.object === undefined ||
+    first.object === null ||
+    second.object === undefined ||
+    second.object === null
+  ) {
+    return false;
+  }
+
+  return (
+    normalizeValue(first.subject) ===
+      normalizeValue(second.subject) &&
+    normalizeValue(first.object) ===
+      normalizeValue(second.object) &&
+    temporalRangesOverlap(first, second)
+  );
+}
+
 function checkOpposingPredicates(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -600,34 +674,12 @@ function checkOpposingPredicates(
         continue;
       }
 
-      const matchingFact = factsB.find((factB) => {
-        if (
-          factB.object === undefined ||
-          factB.object === null
-        ) {
-          return false;
-        }
-
-        const sameSubject =
-          normalizeValue(factA.subject) ===
-          normalizeValue(factB.subject);
-
-        const sameObject =
-          normalizeValue(factA.object) ===
-          normalizeValue(factB.object);
-
-        const sameTime =
-          temporalRangesOverlap(
-            factA,
-            factB
-          );
-
-        return (
-          sameSubject &&
-          sameObject &&
-          sameTime
-        );
-      });
+      const matchingFact = factsB.find((factB) =>
+        areFactsTemporallyCompatible(
+          factA,
+          factB
+        )
+      );
 
       if (!matchingFact) {
         continue;
@@ -649,8 +701,10 @@ function checkOpposingPredicates(
     }
   }
 
-  return inconsistencies;
+
+    return inconsistencies;
 }
+
 
 function checkContradictoryInverseDirections(
   extraction: FactExtraction
@@ -782,19 +836,19 @@ function checkSelfRelations(
   return inconsistencies;
 }
 
-function getTemporalIntersection(
-  currentFrom: string | undefined,
-  currentTo: string | undefined,
+function pathContainsFact(
+  path: Fact[],
   fact: Fact
-): TemporalRange | null {
-  return intersectTemporalRanges(
-    {
-      from: currentFrom,
-      to: currentTo,
-    },
-    fact.temporal
+): boolean {
+  const factKey = getFactKey(fact);
+
+  return path.some(
+    (pathFact) =>
+      getFactKey(pathFact) === factKey
   );
 }
+
+
 
 function hasTransitiveRelation(
   facts: Fact[],
@@ -809,10 +863,7 @@ function hasTransitiveRelation(
   const normalizedTarget =
     normalizeValue(target);
 
-  const queue: Array<{
-    entity: string;
-    path: Fact[];
-  }> = [
+  const queue: FactPathQueueItem[] = [
     {
       entity: normalizedStart,
       path: [],
@@ -872,15 +923,9 @@ function hasTransitiveRelation(
        * Derselbe Fact darf innerhalb
        * eines Pfades nicht erneut verwendet werden.
        */
-      if (
-        path.some(
-          (pathFact) =>
-            getFactKey(pathFact) ===
-            getFactKey(fact)
-        )
-      ) {
-        continue;
-      }
+      if (pathContainsFact(path, fact)) {
+          continue;
+        }
 
       queue.push({
         entity:
@@ -896,16 +941,6 @@ function hasTransitiveRelation(
   return false;
 }
 
-function getTemporalOverlap(
-  first: Fact,
-  second: Fact
-): TemporalRange | null {
-  return intersectTemporalRanges(
-    first.temporal,
-    second.temporal
-  );
-}
-
 function hasTransitiveCycle(
   facts: Fact[],
   predicate: Predicate,
@@ -915,21 +950,18 @@ function hasTransitiveCycle(
   const normalizedStart =
     normalizeValue(start);
 
-  type QueueItem = {
-    entity: string;
-    depth: number;
-    from?: string;
-    to?: string;
-  };
-
-  const queue: QueueItem[] = [
-    {
-      entity: normalizedStart,
-      depth: 0,
-      from: referenceFact?.temporal?.from,
-      to: referenceFact?.temporal?.to,
-    },
-  ];
+ type QueueItem = {
+  entity: string;
+  depth: number;
+  temporal?: TemporalRange;
+};
+ const queue: QueueItem[] = [
+  {
+    entity: normalizedStart,
+    depth: 0,
+    temporal: referenceFact?.temporal,
+  },
+];
 
   const visited = new Set<string>();
 
@@ -943,10 +975,8 @@ function hasTransitiveCycle(
     const {
       entity,
       depth,
-      from,
-      to,
+      temporal,
     } = current;
-
     /*
      * Wir suchen einen Weg zurück zum
      * Ausgangspunkt.
@@ -961,7 +991,8 @@ function hasTransitiveCycle(
     }
 
     const visitKey =
-      `${entity}|${depth}|${from ?? ""}|${to ?? ""}`;
+    `${entity}|${depth}|` +
+    `${temporal?.from ?? ""}|${temporal?.to ?? ""}`;
 
     if (visited.has(visitKey)) {
       continue;
@@ -975,11 +1006,10 @@ function hasTransitiveCycle(
       entity
     )) {
       const temporalIntersection =
-        getTemporalIntersection(
-          from,
-          to,
-          fact
-        );
+      intersectTemporalRanges(
+        temporal,
+        fact.temporal
+      );
 
       /*
        * Keine gemeinsame Zeit mehr.
@@ -991,8 +1021,7 @@ function hasTransitiveCycle(
       queue.push({
         entity: normalizeValue(fact.object),
         depth: depth + 1,
-        from: temporalIntersection.from,
-        to: temporalIntersection.to,
+        temporal: temporalIntersection,
       });
     }
   }
@@ -1172,48 +1201,39 @@ export function checkConsistency(
 ): Inconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
-  /*
-   * 1. Exklusive Fakten
-   */
   inconsistencies.push(
     ...checkExclusiveFacts(extraction)
   );
 
-  /*
-   * 2. Gegensätzliche Prädikate
-   */
   inconsistencies.push(
     ...checkOpposingPredicates(extraction)
   );
 
-  /*
-  * 3 Widersprüchliche inverse Richtung
-  */
   inconsistencies.push(
     ...checkContradictoryInverseDirections(extraction)
-  );  
+  );
 
-  /*
-   * 4. Symmetrische Beziehungen
-   */
-/*   inconsistencies.push(
-    ...checkSymmetricPredicates(extraction)
-  ); */
-
-  /*
-  * 5. Selbstbeziehungen
-  */
   inconsistencies.push(
     ...checkSelfRelations(extraction)
   );
 
-
-  /* 
-  * 6. Transistive Beziehungen
-   */
   inconsistencies.push(
     ...checkTransitivePredicates(extraction)
   );
 
-  return inconsistencies;
+  const unique = new Map<
+    string,
+    Inconsistency
+  >();
+
+  for (const inconsistency of inconsistencies) {
+    const key =
+      getInconsistencyKey(inconsistency);
+
+    if (!unique.has(key)) {
+      unique.set(key, inconsistency);
+    }
+  }
+
+  return Array.from(unique.values());
 }
