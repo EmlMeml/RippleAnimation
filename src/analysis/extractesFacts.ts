@@ -500,17 +500,33 @@ TEXT:
 
 ${text}
 `;
+
   const extraction = await askAI(prompt);
 
-  const normalizedFacts = extraction.facts.map(
-    (fact) => ({
-      ...fact,
-      temporal: normalizeTemporal(
-        fact.temporal,
-        context
-      ),
-    })
+  const orderedFacts = [...extraction.facts].sort(
+    (a, b) =>
+      (a.source?.start ?? Number.MAX_SAFE_INTEGER) -
+      (b.source?.start ?? Number.MAX_SAFE_INTEGER)
   );
+
+  let currentDate = context.referenceDate;
+
+  const normalizedFacts = orderedFacts.map((fact) => {
+    const temporal = normalizeTemporal(
+      fact.temporal,
+      context,
+      currentDate
+    );
+
+    if (temporal?.from) {
+      currentDate = temporal.from;
+    }
+
+  return {
+    ...fact,
+    temporal,
+  };
+});
 
   console.log(
     "NORMALIZED FACTS:",
@@ -526,8 +542,19 @@ ${text}
     )
   );
 
+  const deduplicatedFacts = deduplicateFacts(normalizedFacts);
+
+  console.log(
+    "DEDUPLICATED FACTS:",
+    JSON.stringify(
+      deduplicatedFacts,
+      null,
+      2
+    )
+  );
+
   return {
   ...extraction,
-  facts: deduplicateFacts(normalizedFacts),
+  facts: deduplicatedFacts,
 };
 }

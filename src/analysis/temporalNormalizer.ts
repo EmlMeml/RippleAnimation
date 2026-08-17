@@ -8,19 +8,20 @@ export interface TemporalContext {
 
 export function normalizeTemporal(
   temporal: TemporalContext | undefined,
-  context: StoryContext
+  context: StoryContext,
+  baseDate: string
 ): TemporalContext | undefined {
   if (!temporal?.text) {
     return {
-      from: context.referenceDate,
-      to: context.referenceDate,
+      from: baseDate,
+      to: baseDate,
     };
   }
 
   const text = temporal.text.trim().toLowerCase();
 
   const referenceDate = new Date(
-    `${context.referenceDate}T00:00:00Z`
+    `${baseDate}T00:00:00Z`
   );
 
   function formatDate(date: Date): string {
@@ -52,8 +53,8 @@ export function normalizeTemporal(
   if (text === "heute" || text === "today") {
     return {
       ...temporal,
-      from: context.referenceDate,
-      to: context.referenceDate,
+      from: baseDate,
+      to: baseDate,
     };
   }
 
