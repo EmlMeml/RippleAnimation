@@ -59,6 +59,13 @@ type TemporalRange = {
   to?: string;
 };
 
+
+type FactPathQueueItem = {
+  entity: string;
+  path: Fact[];
+};
+
+
 function intersectTemporalRanges(
   first?: TemporalRange,
   second?: TemporalRange
@@ -112,17 +119,6 @@ function intersectTemporalRanges(
     to,
   };
 }
-
-/*
- * Symmetrische Beziehungen müssen nicht doppelt
- * angegeben werden, sind aber auch nicht widersprüchlich.
- *
- */
-const symmetricPredicates: Predicate[] = [
-  "sibling_of",
-  "friend_of",
-  "married_to",
-];
 
 /*
 * Selbstbeziehungen
@@ -277,11 +273,6 @@ function isHierarchicalLocatedIn(
   );
 }
 
-
-type FactPathQueueItem = {
-  entity: string;
-  path: Fact[];
-};
 
 function findLocatedInPathsFrom(
   facts: Fact[],
