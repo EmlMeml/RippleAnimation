@@ -11,11 +11,14 @@ export function temporalRangesOverlap(
   const bTo = b.temporal?.to;
 
   /*
-   * Wenn einer der beiden Facts keinen
-   * vollständigen Zeitbereich besitzt,
-   * können wir keinen sicheren Konflikt
-   * feststellen.
-   */
+ * Wenn einer der beiden Facts keinen
+ * vollständigen Zeitbereich besitzt,
+ * behandeln wir die Zeit als potenziell
+ * überlappend.
+ *
+ * Dadurch werden mögliche Konflikte nicht
+ * versehentlich übersehen.
+ */
   if (!aFrom || !aTo || !bFrom || !bTo) {
     return true;
   }

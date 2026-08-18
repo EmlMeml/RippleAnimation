@@ -7,6 +7,7 @@ describe("normalizeTemporal", () => {
   const context = {
     referenceDate: "2026-08-14",
   };
+
   let currentDate = context.referenceDate;
 
   it("normalisiert heute", () => {
@@ -20,6 +21,9 @@ describe("normalizeTemporal", () => {
       text: "heute",
       from: "2026-08-14",
       to: "2026-08-14",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
     });
   });
 
@@ -34,6 +38,9 @@ describe("normalizeTemporal", () => {
       text: "morgen",
       from: "2026-08-15",
       to: "2026-08-15",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
     });
   });
 
@@ -48,10 +55,13 @@ describe("normalizeTemporal", () => {
       text: "gestern",
       from: "2026-08-13",
       to: "2026-08-13",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
     });
   });
 
-  it("lässt unbekannte Zeitangaben unverändert", () => {
+  it("markiert unbekannte Zeitangaben als unknown", () => {
     const result = normalizeTemporal(
       { text: "früher" },
       context,
@@ -60,16 +70,25 @@ describe("normalizeTemporal", () => {
 
     expect(result).toEqual({
       text: "früher",
+      source: "unknown",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
     });
   });
 
-  it("lässt fehlenden zeitlichen Kontext unverändert", () => {
+  it("normalisiert fehlenden zeitlichen Kontext als implicit", () => {
     const result = normalizeTemporal(
       undefined,
       context,
       currentDate
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      from: "2026-08-14",
+      to: "2026-08-14",
+      source: "implicit",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
+    });
   });
 });

@@ -49,6 +49,9 @@ describe("extractFacts", () => {
         text: "heute",
         from: "2026-08-14",
         to: "2026-08-14",
+        source: "anchor",
+        anchor: "2026-08-14",
+        advancesTimeline: false,
       },
     });
 
@@ -115,18 +118,24 @@ describe("extractFacts", () => {
       text: "heute",
       from: "2026-08-14",
       to: "2026-08-14",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
     },
   });
 
   expect(result.facts).toContainEqual({
-  subject: "anna",
-  predicate: "located_in",
-  object: "berlin",
-  temporal: {
-    text: "morgen",
-    from: "2026-08-15",
-    to: "2026-08-15",
-  },
+    subject: "anna",
+    predicate: "located_in",
+    object: "berlin",
+    temporal: {
+      text: "morgen",
+      from: "2026-08-15",
+      to: "2026-08-15",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
+    },
   });
   
   });
@@ -160,6 +169,13 @@ describe("extractFacts", () => {
     subject: "anna",
     predicate: "occupation",
     value: "writer",
+    temporal: {
+      from: "2026-08-14",
+      to: "2026-08-14",
+      source: "implicit",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
+    },
   });
   });
 
@@ -200,6 +216,9 @@ describe("extractFacts", () => {
     text: "morgen",
     from: "2026-08-15",
     to: "2026-08-15",
+    source: "anchor",
+    anchor: "2026-08-14",
+    advancesTimeline: false,
   });
   });
 
@@ -236,10 +255,18 @@ describe("extractFacts", () => {
     }
   );
 
-  expect(result.facts[0].temporal).toEqual({
-    text: "heute",
-    from: "2026-08-14",
-    to: "2026-08-14",
+  expect(result.facts).toContainEqual({
+    subject: "anna",
+    predicate: "located_in",
+    object: "munich",
+    temporal: {
+      text: "heute",
+      from: "2026-08-14",
+      to: "2026-08-14",
+      source: "anchor",
+      anchor: "2026-08-14",
+      advancesTimeline: false,
+    },
   });
   });
 

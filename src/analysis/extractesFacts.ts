@@ -512,12 +512,12 @@ ${text}
   let currentDate = context.referenceDate;
 
  const normalizedFacts = orderedFacts.map((fact) => {
-  console.log(
+ /*  console.log(
     "NORMALIZING FACT:",
     fact,
     "CURRENT DATE:",
     currentDate
-  );
+  ); */
 
   const temporal = normalizeTemporal(
     fact.temporal,
@@ -525,21 +525,21 @@ ${text}
     currentDate
   );
 
-  console.log(
+/*   console.log(
     "NORMALIZED TEMPORAL:",
     temporal
   );
-
+ */
   if (
     temporal?.advancesTimeline &&
     temporal.from
   ) {
     currentDate = temporal.from;
 
-    console.log(
+   /*  console.log(
       "UPDATED CURRENT DATE:",
       currentDate
-    );
+    ); */
   }
 
   return {
@@ -548,7 +548,7 @@ ${text}
   };
 });
 
-  console.log(
+ /*  console.log(
     "NORMALIZED FACTS:",
     JSON.stringify(normalizedFacts, null, 2)
   );
@@ -560,18 +560,18 @@ ${text}
       null,
       2
     )
-  );
+  ); */
 
   const deduplicatedFacts = deduplicateFacts(normalizedFacts);
 
-  console.log(
+ /*  console.log(
     "DEDUPLICATED FACTS:",
     JSON.stringify(
       deduplicatedFacts,
       null,
       2
     )
-  );
+  ); */
 
   return {
   ...extraction,
