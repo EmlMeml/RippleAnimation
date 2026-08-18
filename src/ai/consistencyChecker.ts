@@ -68,20 +68,20 @@ type TemporalRange = {
  * source / anchor / advancesTimeline sind für die
  * Konfliktprüfung nicht relevant.
  */
-function getTemporalRange(
+/* function getTemporalRange(
   fact: Fact
 ): TemporalRange {
   return {
     from: fact.temporal?.from,
     to: fact.temporal?.to,
   };
-}
+} */
 
 /**
  * Zwei Facts können nur dann gleichzeitig gültig sein,
  * wenn sich ihre normalisierten Zeiträume überschneiden.
  */
-function factsOverlapTemporally(
+/* function factsOverlapTemporally(
   first: Fact,
   second: Fact
 ): boolean {
@@ -89,7 +89,7 @@ function factsOverlapTemporally(
     first,
     second
   );
-}
+} */
 
 type FactPathQueueItem = {
   entity: string;
@@ -507,7 +507,7 @@ function areLocatedInValuesCompatible(
   return false;
 }
 
-function isImplicitTemporalFact(fact: Fact): boolean {
+/* function isImplicitTemporalFact(fact: Fact): boolean {
   return fact.temporal?.source === "implicit";
 }
 
@@ -516,7 +516,7 @@ function isExplicitAnchorTemporalFact(fact: Fact): boolean {
     fact.temporal?.source === "anchor" &&
     fact.temporal?.text !== undefined
   );
-}
+} */
 
 function checkExclusiveFacts(
   extraction: FactExtraction
