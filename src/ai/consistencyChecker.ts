@@ -59,6 +59,37 @@ type TemporalRange = {
   to?: string;
 };
 
+/**
+ * Liefert den effektiven Zeitraum eines Facts.
+ *
+ * Der ConsistencyChecker interessiert sich ausschließlich
+ * für den normalisierten Zeitraum.
+ *
+ * source / anchor / advancesTimeline sind für die
+ * Konfliktprüfung nicht relevant.
+ */
+/* function getTemporalRange(
+  fact: Fact
+): TemporalRange {
+  return {
+    from: fact.temporal?.from,
+    to: fact.temporal?.to,
+  };
+} */
+
+/**
+ * Zwei Facts können nur dann gleichzeitig gültig sein,
+ * wenn sich ihre normalisierten Zeiträume überschneiden.
+ */
+/* function factsOverlapTemporally(
+  first: Fact,
+  second: Fact
+): boolean {
+  return temporalRangesOverlap(
+    first,
+    second
+  );
+} */
 
 type FactPathQueueItem = {
   entity: string;
@@ -476,29 +507,30 @@ function areLocatedInValuesCompatible(
   return false;
 }
 
+/* function isImplicitTemporalFact(fact: Fact): boolean {
+  return fact.temporal?.source === "implicit";
+}
+
+function isExplicitAnchorTemporalFact(fact: Fact): boolean {
+  return (
+    fact.temporal?.source === "anchor" &&
+    fact.temporal?.text !== undefined
+  );
+} */
+
 function checkExclusiveFacts(
   extraction: FactExtraction
 ): Inconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
   for (const predicate of exclusivePredicates) {
-    /*
-     * Alle Facts für das aktuell exklusive Prädikat.
-     */
     const facts = extraction.facts.filter(
-      (fact) => fact.predicate === predicate
+      (fact) =>
+        fact.predicate === predicate
     );
 
     /*
      * Identische Facts entfernen.
-     *
-     * Beispiel:
-     *
-     * Anna lives_in Munich
-     * Anna lives_in Munich
-     * Anna lives_in Berlin
-     *
-     * Die beiden Munich-Facts werden zu einem Fact.
      */
     const uniqueFacts = Array.from(
       new Map(
@@ -510,10 +542,7 @@ function checkExclusiveFacts(
     );
 
     /*
-     * Facts nach Subjekt gruppieren.
-     *
-     * Nur Facts desselben Subjekts können
-     * miteinander in Konflikt stehen.
+     * Nach Subjekt gruppieren.
      */
     const grouped = new Map<
       string,
@@ -536,8 +565,7 @@ function checkExclusiveFacts(
     }
 
     /*
-     * Innerhalb jeder Subjektgruppe werden
-     * jeweils zwei Facts miteinander verglichen.
+     * Facts desselben Subjekts miteinander vergleichen.
      */
     for (const [
       subject,
@@ -553,15 +581,14 @@ function checkExclusiveFacts(
           j < subjectFacts.length;
           j++
         ) {
-          const factA = subjectFacts[i];
-          const factB = subjectFacts[j];
+          const factA =
+            subjectFacts[i];
+
+          const factB =
+            subjectFacts[j];
 
           /*
-           * Gleicher Wert ist kein Widerspruch.
-           *
-           * Beispiel:
-           * Anna lebt in München.
-           * Anna lebt heute in München.
+           * Gleicher Wert ist niemals ein Konflikt.
            */
           if (
             getFactValue(factA) ===
@@ -570,11 +597,18 @@ function checkExclusiveFacts(
             continue;
           }
 
-          if (predicate === "located_in") {
+          /*
+           * located_in besitzt zusätzlich
+           * hierarchische Kompatibilitätsregeln.
+           */
+          if (
+            predicate === "located_in"
+          ) {
             const locatedFacts =
               extraction.facts.filter(
                 (fact) =>
-                  fact.predicate === "located_in"
+                  fact.predicate ===
+                  "located_in"
               );
 
             if (
@@ -587,11 +621,30 @@ function checkExclusiveFacts(
               continue;
             }
           }
-          /*
-           * Unterschiedliche Werte sind nur dann
-           * widersprüchlich, wenn sich die zeitlichen
-           * Gültigkeitsbereiche überschneiden.
-           */
+
+         /*
+          * Ein impliziter Fact beschreibt den aktuellen
+          * Story-Zeitpunkt ohne explizite temporale Aussage.
+          *
+          * Ein expliziter Anchor-Ausdruck wie "Today"
+          * bezieht sich dagegen auf den festen Story-Anker.
+          *
+          * Diese beiden Informationen sollen nicht allein
+          * aufgrund desselben Datums als Widerspruch gelten.
+          */
+          /* if (
+            (
+              isImplicitTemporalFact(factA) &&
+              isExplicitAnchorTemporalFact(factB)
+            ) ||
+            (
+              isImplicitTemporalFact(factB) &&
+              isExplicitAnchorTemporalFact(factA)
+            )
+          ) {
+            continue;
+          } */
+
           if (
             !temporalRangesOverlap(
               factA,
@@ -600,7 +653,7 @@ function checkExclusiveFacts(
           ) {
             continue;
           }
-          
+
           inconsistencies.push({
             type: "conflicting_fact",
             subject,
@@ -621,7 +674,7 @@ function checkExclusiveFacts(
   return inconsistencies;
 }
 
-function areFactsTemporallyCompatible(
+function areSameRelationTemporallyCompatible(
   first: Fact,
   second: Fact
 ): boolean {
@@ -666,7 +719,7 @@ function checkOpposingPredicates(
       }
 
       const matchingFact = factsB.find((factB) =>
-        areFactsTemporallyCompatible(
+        areSameRelationTemporallyCompatible(
           factA,
           factB
         )

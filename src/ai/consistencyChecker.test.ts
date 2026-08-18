@@ -3396,4 +3396,87 @@ it("meldet mehrere Konflikte trotz Duplikaten jeweils nur einmal", () => {
   ).toHaveLength(1);
 });
 
+it("erkennt eine chronologische Folge von exklusiven Fakten nicht als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+          source: "implicit",
+          anchor: "2026-08-14",
+          advancesTimeline: false,
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "berlin",
+        temporal: {
+          text: "Two years later",
+          from: "2028-08-14",
+          to: "2028-08-14",
+          source: "relative",
+          anchor: "2026-08-14",
+          advancesTimeline: true,
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          text: "Two years later",
+          from: "2030-08-14",
+          to: "2030-08-14",
+          source: "relative",
+          anchor: "2028-08-14",
+          advancesTimeline: true,
+        },
+      },
+    ],
+  };
+
+  expect(checkConsistency(extraction)).toEqual([]);
+});
+
+it("erkennt gleichzeitig widersprüchliche Wohnorte", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "munich",
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+          source: "implicit",
+          anchor: "2026-08-14",
+          advancesTimeline: false,
+        },
+      },
+      {
+        subject: "anna",
+        predicate: "lives_in",
+        object: "hamburg",
+        temporal: {
+          text: "Today",
+          from: "2026-08-14",
+          to: "2026-08-14",
+          source: "anchor",
+          anchor: "2026-08-14",
+          advancesTimeline: false,
+        },
+      },
+    ],
+  };
+
+  expect(checkConsistency(extraction)).toHaveLength(1);
+});
+
 });

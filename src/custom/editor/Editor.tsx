@@ -3,6 +3,7 @@ import {
   createEditor,
   type Descendant,
   Editor,
+  Text,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -16,7 +17,7 @@ import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
 import { extractFacts } from "./../../analysis/extractesFacts";
-import type { FactExtraction } from "./../../types/facts";
+import type { Fact, FactExtraction } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
@@ -24,6 +25,19 @@ import {
 } from './../../ai/consistencyChecker';
 
 import type { StoryContext } from "../../types/story";
+
+type SlatePoint = {
+  path: number[];
+  offset: number;
+};
+
+type FactOccurrence = {
+  fact: Fact;
+  range: {
+    anchor: SlatePoint;
+    focus: SlatePoint;
+  };
+};
 
 type CustomText = {
   text: string;
@@ -74,12 +88,38 @@ const initialValue: Descendant[] = [
   },
 ];
 
+function normalizeSearchText(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function getFactObjectText(fact: Fact): string {
+  if (
+    fact.object !== undefined &&
+    fact.object !== null
+  ) {
+    return String(fact.object);
+  }
+
+  if (
+    fact.value !== undefined &&
+    fact.value !== null
+  ) {
+    return String(fact.value);
+  }
+
+  return "";
+}
+
+
 export default function RichTextEditor({context,}: {context: StoryContext}) {
   const editor = useMemo(() => {
     const e = withHistory(
     withReact(createEditor())
   );
 
+  
   const { isInline } = e;
 
   e.isInline = (element) => {
@@ -111,7 +151,242 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     });
 
     editor.onChange();
+  }  
+/* 
+  function getFactSearchText(fact: Fact): string {
+    const subject = fact.subject;
+    const object =
+      fact.object !== undefined
+        ? String(fact.object)
+        : fact.value !== undefined
+          ? String(fact.value)
+          : "";
+
+    return `${subject} ${object}`.trim();
+  }
+ */
+function findFactOccurrences(
+  editor: Editor,
+  facts: Fact[]
+): FactOccurrence[] {
+  const occurrences: FactOccurrence[] = [];
+
+  const textNodes = Array.from(
+    Editor.nodes(editor, {
+      at: [],
+      match: (node) => Text.isText(node),
+    })
+  );
+
+  type TextOccurrence = {
+    path: number[];
+    start: number;
+    end: number;
+    text: string;
+  };
+
+  function findOccurrences(
+    searchText: string
+  ): TextOccurrence[] {
+    const normalizedSearch =
+      normalizeSearchText(searchText);
+
+    if (!normalizedSearch) {
+      return [];
+    }
+
+    const result: TextOccurrence[] = [];
+
+    for (const [node, path] of textNodes) {
+      if (!Text.isText(node)) {
+        continue;
+      }
+
+      const normalizedNodeText =
+        normalizeSearchText(node.text);
+
+      let searchStart = 0;
+
+      while (true) {
+        const index =
+          normalizedNodeText.indexOf(
+            normalizedSearch,
+            searchStart
+          );
+
+        if (index === -1) {
+          break;
+        }
+
+        result.push({
+          path,
+          start: index,
+          end:
+            index + normalizedSearch.length,
+          text: node.text,
+        });
+
+        searchStart =
+          index + normalizedSearch.length;
+      }
+    }
+
+    return result;
+  }
+
+  const usedOccurrences = new Set<string>();
+
+  function getOccurrenceKey(
+    occurrence: TextOccurrence
+  ): string {
+    return [
+      occurrence.path.join("."),
+      occurrence.start,
+      occurrence.end,
+    ].join(":");
+  }
+
+  function compareOccurrences(
+    first: TextOccurrence,
+    second: TextOccurrence
+  ): number {
+    const firstPath = first.path.join(".");
+    const secondPath = second.path.join(".");
+
+    if (firstPath !== secondPath) {
+      return firstPath.localeCompare(
+        secondPath,
+        undefined,
+        { numeric: true }
+      );
+    }
+
+    return first.start - second.start;
+  }
+
+  for (const fact of facts) {
+    const subjectOccurrences =
+      findOccurrences(fact.subject);
+
+    const objectText =
+      getFactObjectText(fact);
+
+    const objectOccurrences =
+      objectText
+        ? findOccurrences(objectText)
+        : [];
+
+    /*
+     * Wir bevorzugen das erste noch nicht
+     * verwendete Subject.
+     */
+    const subjectOccurrence =
+      subjectOccurrences
+        .sort(compareOccurrences)
+        .find(
+          (occurrence) =>
+            !usedOccurrences.has(
+              getOccurrenceKey(occurrence)
+            )
+        );
+
+    if (!subjectOccurrence) {
+      continue;
+    }
+
+    /*
+     * Das Object muss nach dem Subject liegen.
+     * Dadurch verhindern wir, dass bei wiederholten
+     * Namen versehentlich ein früheres Vorkommen
+     * verwendet wird.
+     */
+    const objectOccurrence =
+      objectOccurrences
+        .sort(compareOccurrences)
+        .find((occurrence) => {
+          if (
+            usedOccurrences.has(
+              getOccurrenceKey(occurrence)
+            )
+          ) {
+            return false;
+          }
+
+          const samePath =
+            occurrence.path.join(".") ===
+            subjectOccurrence.path.join(".");
+
+          if (samePath) {
+            return (
+              occurrence.start >=
+              subjectOccurrence.end
+            );
+          }
+
+          return (
+            compareOccurrences(
+              occurrence,
+              subjectOccurrence
+            ) > 0
+          );
+        });
+
+    /*
+     * Falls kein Object vorhanden ist oder es nicht
+     * gefunden wurde, markieren wir zumindest
+     * das Subject.
+     */
+    if (!objectOccurrence) {
+      const subjectKey =
+        getOccurrenceKey(
+          subjectOccurrence
+        );
+
+      usedOccurrences.add(subjectKey);
+
+      occurrences.push({
+        fact,
+        range: {
+          anchor: {
+            path: subjectOccurrence.path,
+            offset: subjectOccurrence.start,
+          },
+          focus: {
+            path: subjectOccurrence.path,
+            offset: subjectOccurrence.end,
+          },
+        },
+      });
+
+      continue;
+    }
+
+    usedOccurrences.add(
+      getOccurrenceKey(subjectOccurrence)
+    );
+
+    usedOccurrences.add(
+      getOccurrenceKey(objectOccurrence)
+    );
+
+    occurrences.push({
+      fact,
+      range: {
+        anchor: {
+          path: subjectOccurrence.path,
+          offset: subjectOccurrence.start,
+        },
+        focus: {
+          path: objectOccurrence.path,
+          offset: objectOccurrence.end,
+        },
+      },
+    });
+  }
+
+  return occurrences;
 }
+
 
 function deserialize(
   node: Node,
@@ -315,8 +590,23 @@ function deserialize(
 
       setAnalysis(result);
 
+      const occurrences = findFactOccurrences(
+        editor,
+        result.facts
+      );
+
+      console.log(
+        "FACT OCCURRENCES:",
+        occurrences
+      );
+
       const foundInconsistencies =
         checkConsistency(result);
+
+      console.log(
+        "INCONSISTENCIES:",
+        JSON.stringify(foundInconsistencies, null, 2)
+      );
 
       setInconsistencies(foundInconsistencies);
 
