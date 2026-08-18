@@ -1169,6 +1169,245 @@ function checkIndirectAgeConflicts(
   return inconsistencies;
 }
 
+function checkAgeAgainstAgeRelations(
+  extraction: FactExtraction
+): Inconsistency[] {
+  const inconsistencies: Inconsistency[] = [];
+
+  const ageFacts = extraction.facts.filter(
+    (fact) =>
+      fact.predicate === "age" &&
+      fact.value !== undefined &&
+      typeof fact.value === "number"
+  );
+
+  const relationFacts = extraction.facts.filter(
+    (fact) =>
+      fact.predicate === "younger_than" ||
+      fact.predicate === "older_than"
+  );
+
+  for (const relation of relationFacts) {
+    if (
+      relation.object === undefined ||
+      relation.object === null
+    ) {
+      continue;
+    }
+
+    const subjectAge = ageFacts.find(
+      (fact) =>
+        normalizeValue(fact.subject) ===
+          normalizeValue(relation.subject) &&
+        temporalRangesOverlap(fact, relation)
+    );
+
+    const objectAge = ageFacts.find(
+      (fact) =>
+        normalizeValue(fact.subject) ===
+          normalizeValue(relation.object) &&
+        temporalRangesOverlap(fact, relation)
+    );
+
+    if (!subjectAge || !objectAge) {
+      continue;
+    }
+
+    const subjectValue =
+      Number(subjectAge.value);
+
+    const objectValue =
+      Number(objectAge.value);
+
+    let contradiction = false;
+
+    if (
+      relation.predicate === "younger_than" &&
+      subjectValue >= objectValue
+    ) {
+      contradiction = true;
+    }
+
+    if (
+      relation.predicate === "older_than" &&
+      subjectValue <= objectValue
+    ) {
+      contradiction = true;
+    }
+
+    if (!contradiction) {
+      continue;
+    }
+
+    inconsistencies.push({
+      type: "conflicting_fact",
+      subject: relation.subject,
+      predicate: relation.predicate,
+      facts: [
+        subjectAge,
+        objectAge,
+        relation,
+      ],
+      message:
+        `${relation.subject} ist laut Altersangaben ` +
+        `nicht "${relation.predicate}" ${relation.object}.`,
+    });
+  }
+
+  return inconsistencies;
+}
+
+function ageFactCanInformRelation(
+  ageFact: Fact,
+  relationFact: Fact
+): boolean {
+  const ageFrom = ageFact.temporal?.from;
+  const relationTo = relationFact.temporal?.to;
+
+  /*
+   * Ohne zeitliche Information gehen wir davon aus,
+   * dass der Age-Fact verwendet werden darf.
+   */
+  if (!ageFrom || !relationTo) {
+    return true;
+  }
+
+  /*
+   * Eine Altersangabe aus der Zukunft darf
+   * keine frühere Altersrelation erklären/widerlegen.
+   */
+  return ageFrom <= relationTo;
+}
+
+function checkAgeRelationsAgainstAgeFacts(
+  extraction: FactExtraction
+): Inconsistency[] {
+  const inconsistencies: Inconsistency[] = [];
+
+  const ageFacts = extraction.facts.filter(
+    (fact) =>
+      fact.predicate === "age" &&
+      typeof fact.value === "number"
+  );
+
+  const relationFacts = extraction.facts.filter(
+    (fact) =>
+      isAgePredicate(fact.predicate) &&
+      fact.object !== undefined &&
+      fact.object !== null
+  );
+
+  for (const relationFact of relationFacts) {
+    const subject = normalizeValue(
+      relationFact.subject
+    );
+
+    const object = normalizeValue(
+      relationFact.object
+    );
+
+    const subjectAgeFacts = ageFacts.filter(
+      (fact) =>
+        normalizeValue(fact.subject) === subject
+    );
+
+    const objectAgeFacts = ageFacts.filter(
+      (fact) =>
+        normalizeValue(fact.subject) === object
+    );
+
+    for (const subjectAgeFact of subjectAgeFacts) {
+      for (const objectAgeFact of objectAgeFacts) {
+
+        /*
+         * WICHTIG:
+         *
+         * Die beiden Altersangaben müssen aus
+         * demselben zeitlichen Snapshot stammen.
+         *
+         * Dadurch verhindern wir z.B.:
+         *
+         * Anna:   27 Jahre in 2026
+         * Thomas: 30 Jahre in 2028
+         *
+         * miteinander zu vergleichen.
+         */
+        if (
+          !temporalRangesOverlap(
+            subjectAgeFact,
+            objectAgeFact
+          )
+        ) {
+          continue;
+        }
+
+        /*
+         * Ein Alters-Fact darf vor der Relation liegen.
+         *
+         * Beispiel:
+         *
+         * Anna:   27 in 2026
+         * Thomas: 30 in 2026
+         * Relation: Thomas younger_than Anna in 2028
+         *
+         * Die Altersangaben von 2026 dürfen die Relation
+         * von 2028 trotzdem widerlegen.
+         */
+        if (
+          !ageFactCanInformRelation(
+            subjectAgeFact,
+            relationFact
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          !ageFactCanInformRelation(
+            objectAgeFact,
+            relationFact
+          )
+        ) {
+          continue;
+        }
+
+        const subjectAge =
+          Number(subjectAgeFact.value);
+
+        const objectAge =
+          Number(objectAgeFact.value);
+
+        const relationIsWrong =
+          relationFact.predicate ===
+            "younger_than"
+            ? subjectAge >= objectAge
+            : subjectAge <= objectAge;
+
+        if (!relationIsWrong) {
+          continue;
+        }
+
+        inconsistencies.push({
+          type: "conflicting_fact",
+          subject: relationFact.subject,
+          predicate: relationFact.predicate,
+          facts: [
+            subjectAgeFact,
+            objectAgeFact,
+            relationFact,
+          ],
+          message:
+            `${relationFact.subject} kann nicht ` +
+            `"${relationFact.predicate}" ${relationFact.object} sein, ` +
+            `weil das Alter ${subjectAge} zu ${objectAge} beträgt.`,
+        });
+      }
+    }
+  }
+
+  return inconsistencies;
+}
+
 function checkTransitivePredicates(
   extraction: FactExtraction
 ): Inconsistency[] {
@@ -1264,6 +1503,15 @@ export function checkConsistency(
   inconsistencies.push(
     ...checkTransitivePredicates(extraction)
   );
+
+  inconsistencies.push(
+    ...checkAgeAgainstAgeRelations(extraction)
+  );
+
+  inconsistencies.push(
+    ...checkAgeRelationsAgainstAgeFacts(extraction)
+  );
+
 
   const unique = new Map<
     string,

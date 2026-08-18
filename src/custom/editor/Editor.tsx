@@ -588,6 +588,18 @@ function deserialize(
       }
       const result = await extractFacts(text,context);
 
+      console.log("=== EXTRACTED FACTS ===");
+      console.log(JSON.stringify(result, null, 2));
+
+      console.log(
+        "AGE FACTS:",
+        result.facts.filter(
+          f =>
+            f.predicate === "younger_than" ||
+            f.predicate === "older_than"
+        )
+      );
+
       setAnalysis(result);
 
       const occurrences = findFactOccurrences(

@@ -94,6 +94,158 @@ describe("checkConsistency", () => {
     expect(result).toHaveLength(0);
   });
 
+  it("erkennt younger_than und older_than in korrekter umgekehrter Richtung als konsistent", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "Anna",
+        predicate: "younger_than",
+        object: "Thomas",
+      },
+      {
+        subject: "Thomas",
+        predicate: "older_than",
+        object: "Anna",
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+  it("erkennt older_than und younger_than in derselben Richtung als Widerspruch", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        {
+          subject: "Anna",
+          predicate: "older_than",
+          object: "Thomas",
+        },
+        {
+          subject: "Anna",
+          predicate: "younger_than",
+          object: "Thomas",
+        },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(1);
+  });
+
+  it("erkennt einen Widerspruch auch zwischen mehreren unabhängigen Fakten", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        {
+          subject: "Anna",
+          predicate: "friend_of",
+          object: "Lisa",
+        },
+        {
+          subject: "Thomas",
+          predicate: "younger_than",
+          object: "Peter",
+        },
+        {
+          subject: "Anna",
+          predicate: "younger_than",
+          object: "Thomas",
+        },
+        {
+          subject: "Anna",
+          predicate: "older_than",
+          object: "Thomas",
+        },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(1);
+  });
+
+  it("erkennt mehrere unabhängige Widersprüche", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        {
+          subject: "Anna",
+          predicate: "younger_than",
+          object: "Thomas",
+        },
+        {
+          subject: "Anna",
+          predicate: "older_than",
+          object: "Thomas",
+        },
+        {
+          subject: "Lisa",
+          predicate: "parent_of",
+          object: "Peter",
+        },
+        {
+          subject: "Lisa",
+          predicate: "child_of",
+          object: "Peter",
+        },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("erkennt sibling_of in beiden Richtungen als konsistent", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        {
+          subject: "Anna",
+          predicate: "sibling_of",
+          object: "Thomas",
+        },
+        {
+          subject: "Thomas",
+          predicate: "sibling_of",
+          object: "Anna",
+        },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("erkennt friend_of in beiden Richtungen als konsistent", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        {
+          subject: "Anna",
+          predicate: "friend_of",
+          object: "Thomas",
+        },
+        {
+          subject: "Thomas",
+          predicate: "friend_of",
+          object: "Anna",
+        },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(0);
+  });
+
   it("erkennt parent_of und child_of in korrekter Richtung als konsistent", () => {
     const extraction: FactExtraction = {
       entities: [],
@@ -3477,6 +3629,201 @@ it("erkennt gleichzeitig widersprüchliche Wohnorte", () => {
   };
 
   expect(checkConsistency(extraction)).toHaveLength(1);
+});
+
+it("erkennt younger_than als Widerspruch zu konkreten Altersangaben", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "age",
+        value: 27,
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "age",
+        value: 30,
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt older_than als konsistent mit konkreten Altersangaben", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "age",
+        value: 27,
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "age",
+        value: 30,
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "older_than",
+        object: "anna",
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("vermischt Altersangaben aus unterschiedlichen Zeitpunkten nicht", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "age",
+        value: 27,
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "age",
+        value: 30,
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
+});
+
+it("erkennt younger_than anhand zeitlich früherer age-Facts", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "age",
+        value: 27,
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "age",
+        value: 30,
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(1);
+});
+
+it("erkennt younger_than als konsistent, wenn die Altersdifferenz stimmt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "anna",
+        predicate: "age",
+        value: 27,
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "age",
+        value: 25,
+        temporal: {
+          from: "2026-08-14",
+          to: "2026-08-14",
+        },
+      },
+      {
+        subject: "thomas",
+        predicate: "younger_than",
+        object: "anna",
+        temporal: {
+          from: "2028-08-14",
+          to: "2028-08-14",
+        },
+      },
+    ],
+  };
+
+  const result = checkConsistency(extraction);
+
+  expect(result).toHaveLength(0);
 });
 
 });

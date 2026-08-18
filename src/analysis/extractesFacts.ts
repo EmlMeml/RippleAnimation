@@ -508,70 +508,78 @@ ${text}
       (a.source?.start ?? Number.MAX_SAFE_INTEGER) -
       (b.source?.start ?? Number.MAX_SAFE_INTEGER)
   );
-
   let currentDate = context.referenceDate;
 
- const normalizedFacts = orderedFacts.map((fact) => {
- /*  console.log(
-    "NORMALIZING FACT:",
-    fact,
-    "CURRENT DATE:",
-    currentDate
-  ); */
+  const normalizedFacts: Fact[] = [];
 
-  const temporal = normalizeTemporal(
-    fact.temporal,
-    context,
-    currentDate
-  );
+  let activeTemporalText: string | undefined;
+  let activeTemporalDate: string | undefined;
 
-/*   console.log(
-    "NORMALIZED TEMPORAL:",
-    temporal
-  );
- */
-  if (
-    temporal?.advancesTimeline &&
-    temporal.from
-  ) {
-    currentDate = temporal.from;
+  for (let i = 0; i < orderedFacts.length; i++) {
+    const fact = orderedFacts[i];
 
-   /*  console.log(
-      "UPDATED CURRENT DATE:",
-      currentDate
-    ); */
+    const temporalText =
+      fact.temporal?.text?.trim().toLowerCase();
+
+    const previousFact =
+      i > 0
+        ? orderedFacts[i - 1]
+        : undefined;
+
+    const previousTemporalText =
+      previousFact?.temporal?.text
+        ?.trim()
+        .toLowerCase();
+
+    /*
+    * Derselbe temporale Ausdruck direkt hintereinander
+    * bedeutet zunächst dieselbe temporale Gruppe.
+    */
+    const isSameTemporalGroup =
+      temporalText !== undefined &&
+      temporalText === previousTemporalText &&
+      temporalText === activeTemporalText &&
+      activeTemporalDate !== undefined;
+
+    let temporal;
+
+    if (isSameTemporalGroup) {
+      temporal = {
+        ...fact.temporal,
+        from: activeTemporalDate,
+        to: activeTemporalDate,
+        source: "relative" as const,
+        anchor: currentDate,
+        advancesTimeline: false,
+      };
+    } else {
+      temporal = normalizeTemporal(
+        fact.temporal,
+        context,
+        currentDate
+      );
+    }
+
+    normalizedFacts.push({
+      ...fact,
+      temporal,
+    });
+
+    if (
+      !isSameTemporalGroup &&
+      temporal?.advancesTimeline &&
+      temporal.from
+    ) {
+      currentDate = temporal.from;
+
+      activeTemporalText = temporalText;
+      activeTemporalDate = temporal.from;
+    } else if (!isSameTemporalGroup) {
+      activeTemporalText = temporalText;
+      activeTemporalDate = temporal?.from;
+    }
   }
-
-  return {
-    ...fact,
-    temporal,
-  };
-});
-
- /*  console.log(
-    "NORMALIZED FACTS:",
-    JSON.stringify(normalizedFacts, null, 2)
-  );
-
-  console.log(
-    "DEDUPLICATED FACTS:",
-    JSON.stringify(
-      deduplicateFacts(normalizedFacts),
-      null,
-      2
-    )
-  ); */
-
   const deduplicatedFacts = deduplicateFacts(normalizedFacts);
-
- /*  console.log(
-    "DEDUPLICATED FACTS:",
-    JSON.stringify(
-      deduplicatedFacts,
-      null,
-      2
-    )
-  ); */
 
   return {
   ...extraction,
