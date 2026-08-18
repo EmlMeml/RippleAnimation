@@ -511,16 +511,36 @@ ${text}
 
   let currentDate = context.referenceDate;
 
-  const normalizedFacts = orderedFacts.map((fact) => {
-    const temporal = normalizeTemporal(
-      fact.temporal,
-      context,
+ const normalizedFacts = orderedFacts.map((fact) => {
+  console.log(
+    "NORMALIZING FACT:",
+    fact,
+    "CURRENT DATE:",
+    currentDate
+  );
+
+  const temporal = normalizeTemporal(
+    fact.temporal,
+    context,
+    currentDate
+  );
+
+  console.log(
+    "NORMALIZED TEMPORAL:",
+    temporal
+  );
+
+  if (
+    temporal?.advancesTimeline &&
+    temporal.from
+  ) {
+    currentDate = temporal.from;
+
+    console.log(
+      "UPDATED CURRENT DATE:",
       currentDate
     );
-
-    if (temporal?.from) {
-      currentDate = temporal.from;
-    }
+  }
 
   return {
     ...fact,

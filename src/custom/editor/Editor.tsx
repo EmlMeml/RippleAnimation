@@ -152,7 +152,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     editor.onChange();
   }  
-
+/* 
   function getFactSearchText(fact: Fact): string {
     const subject = fact.subject;
     const object =
@@ -164,7 +164,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     return `${subject} ${object}`.trim();
   }
-
+ */
 function findFactOccurrences(
   editor: Editor,
   facts: Fact[]

@@ -7,11 +7,13 @@ describe("normalizeTemporal", () => {
   const context = {
     referenceDate: "2026-08-14",
   };
+  let currentDate = context.referenceDate;
 
   it("normalisiert heute", () => {
     const result = normalizeTemporal(
       { text: "heute" },
-      context
+      context,
+      currentDate
     );
 
     expect(result).toEqual({
@@ -24,7 +26,8 @@ describe("normalizeTemporal", () => {
   it("normalisiert morgen", () => {
     const result = normalizeTemporal(
       { text: "morgen" },
-      context
+      context,
+      currentDate
     );
 
     expect(result).toEqual({
@@ -37,7 +40,8 @@ describe("normalizeTemporal", () => {
   it("normalisiert gestern", () => {
     const result = normalizeTemporal(
       { text: "gestern" },
-      context
+      context,
+      currentDate
     );
 
     expect(result).toEqual({
@@ -50,7 +54,8 @@ describe("normalizeTemporal", () => {
   it("lässt unbekannte Zeitangaben unverändert", () => {
     const result = normalizeTemporal(
       { text: "früher" },
-      context
+      context,
+      currentDate
     );
 
     expect(result).toEqual({
@@ -61,7 +66,8 @@ describe("normalizeTemporal", () => {
   it("lässt fehlenden zeitlichen Kontext unverändert", () => {
     const result = normalizeTemporal(
       undefined,
-      context
+      context,
+      currentDate
     );
 
     expect(result).toBeUndefined();
