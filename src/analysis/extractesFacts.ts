@@ -501,20 +501,22 @@ TEXT:
 ${text}
 `;
 
+  console.log("vor askAI");
   const extraction = await askAI(prompt);
-
+  console.log("nach askAI | vor orderFacts");
   const orderedFacts = [...extraction.facts].sort(
     (a, b) =>
       (a.source?.start ?? Number.MAX_SAFE_INTEGER) -
       (b.source?.start ?? Number.MAX_SAFE_INTEGER)
   );
+  console.log("nach orderFacts");
   let currentDate = context.referenceDate;
 
   const normalizedFacts: Fact[] = [];
 
   let activeTemporalText: string | undefined;
   let activeTemporalDate: string | undefined;
-
+  console.log("vor for: orderfacts");
   for (let i = 0; i < orderedFacts.length; i++) {
     const fact = orderedFacts[i];
 
@@ -579,8 +581,9 @@ ${text}
       activeTemporalDate = temporal?.from;
     }
   }
+  console.log("nach for - orderFacts");
   const deduplicatedFacts = deduplicateFacts(normalizedFacts);
-
+  console.log("nach dedeuplicate");
   return {
   ...extraction,
   facts: deduplicatedFacts,

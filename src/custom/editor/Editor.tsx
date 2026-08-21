@@ -12,6 +12,7 @@ import {
   Editable,
   withReact,
   useSlate,
+  ReactEditor
 } from "slate-react";
 import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
@@ -23,6 +24,7 @@ import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
+import EditorNavigation from "./EditorNavigation";
 
 import type { StoryContext } from "../../types/story";
 
@@ -140,6 +142,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [, setAnalysisError] = useState("");
 
+  const [document, setDocument] = useState<Descendant[]>(initialValue);
+
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
       editor.children = nodes;
@@ -149,7 +153,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         focus: { path: [0, 0], offset: 0 },
       };
     });
-
+    setDocument(nodes);
     editor.onChange();
   }  
 /* 
@@ -581,11 +585,12 @@ function deserialize(
 
     try {
       const text = getEditorText(editor.children);
-
+      console.log('editor-text: ',text);
       if (!text.trim()) {
         setAnalysisError("Der Editor ist leer.");
         return;
       }
+      console.log("vor extract");
       const result = await extractFacts(text,context);
 
       console.log("=== EXTRACTED FACTS ===");
@@ -636,6 +641,41 @@ function deserialize(
   }
 
   return (
+    <div className="content-container">
+      <div className="editor-navigation-container">
+        <EditorNavigation
+        document={document}
+        inconsistencies={inconsistencies}
+        onNavigate={(path) => {
+          try {
+            const point = Editor.start(editor, path);
+
+            Transforms.select(editor, {
+              anchor: point,
+              focus: point,
+            });
+
+            ReactEditor.focus(editor);
+
+            const element = ReactEditor.toDOMNode(
+              editor,
+              Editor.node(editor, path)[0]
+            );
+
+            element.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          } catch (error) {
+            console.error(
+              "Navigation zum Absatz fehlgeschlagen:",
+              error
+            );
+          }
+        }}
+      />
+        
+    </div>
     <div className="editor-container">
         <Slate
             editor={editor}
@@ -654,6 +694,8 @@ function deserialize(
             renderLeaf={renderLeaf}
             spellCheck
             onChange={() => {
+              setDocument([...editor.children]);
+
               console.log(
                 "SLATE ONCHANGE:",
                 getEditorText(editor.children)
@@ -714,7 +756,7 @@ function deserialize(
         </div>
       )}
     </div>
-      
+  </div>   
   );
 }
 

@@ -1,0 +1,28 @@
+.editor-navigation {
+  width: 24px;
+  height: 100%;
+}
+
+.editor-navigation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: 720px;
+}
+
+.editor-navigation-segment {
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: #d0d0d0;
+  cursor: pointer;
+}
+
+.editor-navigation-segment:hover {
+  opacity: 0.75;
+}
+
+.editor-navigation-segment.has-inconsistency {
+  background: #e57373;
+}
