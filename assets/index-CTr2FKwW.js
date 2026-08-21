@@ -251,61 +251,43 @@ Character number: `+e.characterNumber},n.prototype.lineNumber=function(){return 
 `)}function w(e){return`Error was at character number `+e.characterNumber()+`: Expected `+e.expected+` but got `+e.actual}var T=c()})),kw=s((e=>{e.readOptions=i;var t=(bS(),d(yS)),n=e._defaultStyleMap=`p.Heading1 => h1:fresh,p.Heading2 => h2:fresh,p.Heading3 => h3:fresh,p.Heading4 => h4:fresh,p.Heading5 => h5:fresh,p.Heading6 => h6:fresh,p[style-name='Heading 1'] => h1:fresh,p[style-name='Heading 2'] => h2:fresh,p[style-name='Heading 3'] => h3:fresh,p[style-name='Heading 4'] => h4:fresh,p[style-name='Heading 5'] => h5:fresh,p[style-name='Heading 6'] => h6:fresh,p[style-name='heading 1'] => h1:fresh,p[style-name='heading 2'] => h2:fresh,p[style-name='heading 3'] => h3:fresh,p[style-name='heading 4'] => h4:fresh,p[style-name='heading 5'] => h5:fresh,p[style-name='heading 6'] => h6:fresh,p.Heading => h1:fresh,p[style-name='Heading'] => h1:fresh,r[style-name='Strong'] => strong,p[style-name='footnote text'] => p:fresh,r[style-name='footnote reference'] =>,p[style-name='endnote text'] => p:fresh,r[style-name='endnote reference'] =>,p[style-name='annotation text'] => p:fresh,r[style-name='annotation reference'] =>,p[style-name='Footnote'] => p:fresh,r[style-name='Footnote anchor'] =>,p[style-name='Endnote'] => p:fresh,r[style-name='Endnote anchor'] =>,p:unordered-list(1) => ul > li:fresh,p:unordered-list(2) => ul|ol > li > ul > li:fresh,p:unordered-list(3) => ul|ol > li > ul|ol > li > ul > li:fresh,p:unordered-list(4) => ul|ol > li > ul|ol > li > ul|ol > li > ul > li:fresh,p:unordered-list(5) => ul|ol > li > ul|ol > li > ul|ol > li > ul|ol > li > ul > li:fresh,p:ordered-list(1) => ol > li:fresh,p:ordered-list(2) => ul|ol > li > ol > li:fresh,p:ordered-list(3) => ul|ol > li > ul|ol > li > ol > li:fresh,p:ordered-list(4) => ul|ol > li > ul|ol > li > ul|ol > li > ol > li:fresh,p:ordered-list(5) => ul|ol > li > ul|ol > li > ul|ol > li > ul|ol > li > ol > li:fresh,r[style-name='Hyperlink'] =>,p[style-name='Normal'] => p:fresh,p.Body => p:fresh,p[style-name='Body'] => p:fresh`.split(`,`),r=e._standardOptions={externalFileAccess:!1,transformDocument:o,includeDefaultStyleMap:!0,includeEmbeddedStyleMap:!0};function i(e){return e||={},t.extend({},r,e,{customStyleMap:a(e.styleMap),readStyleMap:function(){var e=this.customStyleMap;return this.includeEmbeddedStyleMap&&(e=e.concat(a(this.embeddedStyleMap))),this.includeDefaultStyleMap&&(e=e.concat(n)),e}})}function a(e){return e?t.isString(e)?e.split(`
 `).map(function(e){return e.trim()}).filter(function(e){return e!==``&&e.charAt(0)!==`#`}):e:[]}function o(e){return e}})),Aw=s((e=>{var t=nC(),n=sC();e.openZip=r;function r(e){return e.arrayBuffer?t.resolve(n.openArrayBuffer(e.arrayBuffer)):t.reject(Error(`Could not find file in options`))}})),jw=s((e=>{var t=sw(),n=ow();e.element=r;function r(e){return function(r){return n.elementWithTag(t.element(e),[r])}}})),Mw=u(s((e=>{var t=(bS(),d(yS)),n=nw(),r=rw(),i=fw().DocumentConverter;pw().convertElementToRawText;var a=Ow().readStyle,o=kw().readOptions,s=Aw(),c=iC().Result;e.convertToHtml=l,e.images=cw(),e.transforms=GC(),e.underline=jw();function l(e,t){return u(e,t)}function u(e,t){return t=o(t),s.openZip(e).tap(function(e){return r.readStyleMap(e).then(function(e){t.embeddedStyleMap=e})}).then(function(r){return n.read(r,e,t).then(function(e){return e.map(t.transformDocument)}).then(function(e){return f(e,t)})})}function f(e,n){var r=p(n.readStyleMap()),a=new i(t.extend({},n,{styleMap:r.value}));return e.flatMapThen(function(e){return r.flatMapThen(function(t){return a.convertToHtml(e)})})}function p(e){return c.combine((e||[]).map(a)).map(function(e){return e.filter(function(e){return!!e})})}}))(),1);function Nw({onTextLoad:e,onHtmlLoad:t}){let[,n]=(0,x.useState)(null),[r,i]=(0,x.useState)(null);async function a(r){let a=r.target.files?.[0]??null;if(n(a),i(null),a)try{let n=a.name.toLowerCase();if(n.endsWith(`.docx`)){let e=await a.arrayBuffer(),n=await Mw.convertToHtml({arrayBuffer:e});t?.(n.value);return}if(n.endsWith(`.html`)||n.endsWith(`.htm`)){let e=await a.text();t?.(e);return}let r=await a.text();e?.(r)}catch(e){console.error(e),i(`Unable to read the selected File`)}}return(0,U.jsxs)(`div`,{className:`uploadDiv`,children:[(0,U.jsxs)(`label`,{className:`fileUploadBtn`,children:[(0,U.jsx)(Mh,{style:{color:`#2b311c`}}),`Upload File`,(0,U.jsx)(`input`,{type:`file`,accept:`.txt,.md,.json,.js,.ts,.tsx,.docx,.html`,onChange:a,style:{position:`absolute`,left:0,top:0,width:`100%`,height:`100%`,opacity:0,cursor:`pointer`,border:0,padding:0,margin:0,color:`#666e5b`}})]}),r&&(0,U.jsx)(`div`,{style:{marginTop:`8px`,color:`red`},children:r})]})}var Pw=`https://small-hill-7bd7.ripple-ai.workers.dev/api/chat`;async function Fw(e){let t=performance.now();console.log(`[AI] Request startet`);let n=await fetch(Pw,{method:`POST`,headers:{"Content-Type":`application/json`},body:JSON.stringify({prompt:e})});if(console.log(`[AI] fetch fertig: ${((performance.now()-t)/1e3).toFixed(2)}s`),!n.ok){console.log(`vor response`);let e=await n.text();throw console.log(`nach response`),Error(`AI request failed: ${n.status} ${e}`)}console.log(`[AI] vor json`);let r=performance.now(),i=await n.json();return console.log(`[AI] JSON parsing: ${((performance.now()-r)/1e3).toFixed(2)}s`),console.log(`[AI] Gesamtzeit: ${((performance.now()-t)/1e3).toFixed(2)}s`),i.response}function Iw(e,t,n){if(!e?.text)return{...e,from:n,to:n,source:`implicit`,anchor:n,advancesTimeline:!1};let r=e.text.trim().toLowerCase(),i=new Date(`${t.referenceDate}T00:00:00Z`),a=new Date(`${n}T00:00:00Z`);function o(e){return e.toISOString().slice(0,10)}function s(e){let t=new Date(a);return t.setUTCDate(t.getUTCDate()+e),o(t)}function c(e){let t=new Date(a);return t.setUTCMonth(t.getUTCMonth()+e),o(t)}function l(e){let t=new Date(a);return t.setUTCFullYear(t.getUTCFullYear()+e),o(t)}function u(e){let t=new Date(i);return t.setUTCDate(t.getUTCDate()+e),o(t)}if(r===`heute`||r===`today`)return{...e,from:t.referenceDate,to:t.referenceDate,source:`anchor`,anchor:t.referenceDate,advancesTimeline:!1};if(r===`morgen`||r===`tomorrow`){let n=u(1);return{...e,from:n,to:n,source:`anchor`,anchor:t.referenceDate,advancesTimeline:!1}}if(r===`gestern`||r===`yesterday`){let n=u(-1);return{...e,from:n,to:n,source:`anchor`,anchor:t.referenceDate,advancesTimeline:!1}}let d=r.match(/^(\d+)\s+days?\s+later$/);if(d){let t=s(Number(d[1]));return{...e,from:t,to:t,source:`relative`,anchor:n,advancesTimeline:!0}}let f=r.match(/^(\d+)\s+weeks?\s+later$/);if(f){let t=s(Number(f[1])*7);return{...e,from:t,to:t,source:`relative`,anchor:n,advancesTimeline:!0}}let p=r.match(/^(\d+)\s+months?\s+later$/);if(p){let t=c(Number(p[1]));return{...e,from:t,to:t,source:`relative`,anchor:n,advancesTimeline:!0}}let m={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10},h=r.match(/^(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+years?\s+later$/);if(h){let t=h[1],r=l(m[t]??Number(t));return{...e,from:r,to:r,source:`relative`,anchor:n,advancesTimeline:!0}}return{...e,source:`unknown`,anchor:n,advancesTimeline:!1}}function Lw(e){return[e.subject.trim().toLowerCase(),e.predicate,e.value===void 0?``:String(e.value).trim().toLowerCase(),e.object!==void 0&&e.object!==null?String(e.object).trim().toLowerCase():``,e.temporal?.text?.trim().toLowerCase()??``,e.temporal?.from??``,e.temporal?.to??``].join(`|`)}function Rw(e){let t=new Map;for(let n of e){let e=Lw(n);t.has(e)||t.set(e,n)}return Array.from(t.values())}async function zw(e,t){let n=`
 You extract explicit facts from the text.
-
 Return ONLY valid JSON.
-
 The output MUST have exactly this structure:
-
 {
   "entities": [],
   "facts": []
 }
 
 ENTITIES
-
 Extract all relevant people, places, organizations, objects,
 and events explicitly mentioned in the text.
-
 Each entity must have:
-
 {
   "id": "stable_id",
   "name": "original name",
   "type": "person"
 }
-
 Allowed entity types:
-
 - person
 - place
 - organization
 - object
 - event
-
 Use stable IDs.
 Use lowercase IDs when possible.
 
 FACTS
-
 Each fact must have:
-
 {
   "subject": "entity_id",
   "predicate": "predicate_name"
 }
-
 Facts may additionally have either:
-
 "value"
-
 OR
-
 "object"
-
 Do not use both unless absolutely necessary.
-
 Allowed predicates:
-
 - age
 - gender
 - born_in
@@ -325,17 +307,13 @@ Allowed predicates:
 - older_than
 
 PREDICATE SELECTION
-
 Use predicates according to the exact meaning of the text.
 
 LIVING LOCATION:
-
 If the text says that a person lives in a place, always use:
-
 "lives_in"
 
 Examples:
-
 "Anna lebt in München."
 →
 {
@@ -343,7 +321,6 @@ Examples:
   "predicate": "lives_in",
   "object": "munich"
 }
-
 "Anna wohnt in Berlin."
 →
 {
@@ -353,10 +330,8 @@ Examples:
 }
 
 Do NOT use "located_in" for a person's residence.
-
 Use "located_in" only when the text explicitly describes the
 physical/location relationship of an entity, for example:
-
 "Das Krankenhaus befindet sich in München."
 →
 {
@@ -366,43 +341,30 @@ physical/location relationship of an entity, for example:
 }
 
 PREDICATE RULE FOR RESIDENCE
-
 If a person lives, resides, or lives at a place,
 always use "lives_in".
-
 Examples:
-
 "Anna lebt in München."
 → lives_in
-
 "Anna wohnt in Berlin."
 → lives_in
-
 "Anna resides in Hamburg."
 → lives_in
-
 Never use "located_in" for a person's residence.
-
 "located_in" should only be used for explicit location
 relationships of entities such as buildings, objects,
 organizations, or places.
 
 TEMPORAL FACTS
-
 If a temporal expression modifies a fact, attach it to that fact.
-
 Example:
-
 "Anna lebt in München. Two years later lebt Anna in Berlin."
-
 Return:
-
 {
   "subject": "anna",
   "predicate": "lives_in",
   "object": "munich"
 }
-
 {
   "subject": "anna",
   "predicate": "lives_in",
@@ -411,26 +373,18 @@ Return:
     "text": "Two years later"
   }
 }
-
 TEMPORAL EXPRESSIONS
-
 If a fact is explicitly introduced by a temporal expression,
 attach that temporal expression to the fact.
-
 Example:
-
 "Anna lebt in München. Two years later lebt Anna in Berlin."
-
 Return:
-
 {
   "subject": "anna",
   "predicate": "lives_in",
   "object": "munich"
 }
-
 and:
-
 {
   "subject": "anna",
   "predicate": "lives_in",
@@ -439,38 +393,27 @@ and:
     "text": "Two years later"
   }
 }
-
 Do not replace "lives_in" with "located_in".
 Do not omit the temporal expression.
 
 AGE
-
 If the text says:
-
 "Anna is 27 years old."
-
 return:
-
 {
   "subject": "anna",
   "predicate": "age",
   "value": 27
 }
-
 The value MUST be a number.
-
 Do not add "years".
 Do not add "years old".
 Do not use the object field.
 
 RELATIONSHIPS
-
 If the text says:
-
 "Thomas is Anna's brother."
-
 return:
-
 {
   "subject": "thomas",
   "predicate": "sibling_of",
@@ -478,46 +421,32 @@ return:
 }
 
 RELATIVE AGE
-
 If the text says:
-
 "Thomas is Anna's younger brother."
-
 return TWO facts:
-
 {
   "subject": "thomas",
   "predicate": "sibling_of",
   "object": "anna"
 }
-
 and:
-
 {
   "subject": "thomas",
   "predicate": "younger_than",
   "object": "anna"
 }
-
 If the text says someone is older than another person,
 use "older_than".
 
 TEMPORAL CONTEXT
-
 Facts may optionally include temporal information.
-
 Use:
-
 {
   "text": "original temporal expression"
 }
-
 to preserve explicit temporal expressions from the text.
-
 Examples:
-
 "Anna lebt heute in München."
-
 {
   "subject": "anna",
   "predicate": "lives_in",
@@ -526,9 +455,7 @@ Examples:
     "text": "heute"
   }
 }
-
 "Anna lebte früher in Berlin."
-
 {
   "subject": "anna",
   "predicate": "lives_in",
@@ -537,9 +464,7 @@ Examples:
     "text": "früher"
   }
 }
-
 "Anna wird morgen nach Berlin fahren."
-
 {
   "subject": "anna",
   "predicate": "located_in",
@@ -548,9 +473,7 @@ Examples:
     "text": "morgen"
   }
 }
-
 "Anna lebt seit 2020 in München."
-
 {
   "subject": "anna",
   "predicate": "lives_in",
@@ -561,148 +484,97 @@ Examples:
 }
 
 STORY TIME CONTEXT
-
 The reference date for this story is:
-
 ${t.referenceDate}
-
 Interpret relative temporal expressions relative to this date.
-
 For example:
-
-"heute" refers to the reference date.
-"morgen" refers to the day after the reference date.
-"gestern" refers to the day before the reference date.
+"today" refers to the reference date.
+"tomorrow" refers to the day after the reference date.
+"yesterday" refers to the day before the reference date.
 
 IMPORTANT:
-
 Do not use the real current date.
-
 Use ONLY the provided story reference date.
-
 Do not calculate or output normalized dates.
-
 Preserve the original temporal expression exactly as written
 in the text.
-
 Only add temporal information when the text explicitly contains
 a temporal expression.
-
 Do not invent dates or time periods.
-
 Do not try to determine whether two temporal expressions overlap.
-
 The consistency checker will handle temporal consistency later.
 
 IMPORTANT
-
 Never use:
-
 "<="
 ">="
 "<"
 ">"
-
 as values.
-
 Never invent information.
-
 Never infer facts that are not explicitly stated.
-
 Do not determine contradictions.
-
 Do not explain your reasoning.
-
 Do not summarize.
-
 Do not return Markdown.
-
 Return ONLY JSON.
 
 COMPLETENESS
-
 Extract EVERY explicitly stated fact from the text.
-
 Do not omit facts.
-
 Do not merge facts.
-
 Do not overwrite facts.
-
 Do not deduplicate facts merely because they have the same
 subject and predicate.
-
 Multiple facts with the same subject and predicate are allowed
 and MUST be preserved.
-
 For example:
-
 "Anna lebt in München. Später lebt Anna in Berlin."
-
 MUST produce TWO separate facts:
-
 {
   "subject": "anna",
   "predicate": "lives_in",
   "object": "munich"
 }
-
 and:
-
 {
   "subject": "anna",
   "predicate": "lives_in",
   "object": "berlin"
 }
-
 If one sentence explicitly expresses multiple facts,
 create one fact for EACH explicitly stated fact.
-
 For example:
-
 "Thomas ist Annas Bruder und jünger als Anna."
-
 MUST produce TWO separate facts:
-
 {
   "subject": "thomas",
   "predicate": "sibling_of",
   "object": "anna"
 }
-
 and:
-
 {
   "subject": "thomas",
   "predicate": "younger_than",
   "object": "anna"
 }
-
 Never remove a fact because another fact about the same
 subject already exists.
 
 RELATIVE TIME EXPRESSIONS
-
 Extract relative temporal expressions exactly as written.
-
 Examples:
-
 "Two years later Anna moved to Berlin."
-
 The fact must contain:
-
 "temporal": {
   "text": "Two years later"
 }
-
 Other examples include:
-
 "one year later"
 "two years later"
 "three months later"
 "two weeks later"
 "five days later"
-
 Preserve the original temporal expression exactly as written.
 Do not calculate the date yourself.
 
@@ -710,4 +582,4 @@ TEXT:
 
 ${e}
 `;console.log(`vor askAI`);let r=await Fw(n);console.log(`nach askAI | vor orderFacts`);let i=[...r.facts].sort((e,t)=>(e.source?.start??2**53-1)-(t.source?.start??2**53-1));console.log(`nach orderFacts`);let a=t.referenceDate,o=[],s,c;console.log(`vor for: orderfacts`);for(let e=0;e<i.length;e++){let n=i[e],r=n.temporal?.text?.trim().toLowerCase(),l=(e>0?i[e-1]:void 0)?.temporal?.text?.trim().toLowerCase(),u=r!==void 0&&r===l&&r===s&&c!==void 0,d;d=u?{...n.temporal,from:c,to:c,source:`relative`,anchor:a,advancesTimeline:!1}:Iw(n.temporal,t,a),o.push({...n,temporal:d}),!u&&d?.advancesTimeline&&d.from?(a=d.from,s=r,c=d.from):u||(s=r,c=d?.from)}console.log(`nach for - orderFacts`);let l=Rw(o);return console.log(`nach dedeuplicate`),{...r,facts:l}}function Bw(e){return e.map(e=>`children`in e?e.children.map(e=>`text`in e?e.text:``).join(``):``).join(`
-`)}function Vw(e,t){let n=e.temporal?.from,r=e.temporal?.to,i=t.temporal?.from,a=t.temporal?.to;return!n||!r||!i||!a||!(r<i||a<n)}var Hw=[`age`,`gender`,`born_in`,`lives_in`,`located_in`,`works_at`,`occupation`],Uw=[[`younger_than`,`older_than`]],Ww={parent_of:`child_of`,child_of:`parent_of`,owns:`has`,has:`owns`};function Gw(e,t){if(!e&&!t)return{};if(!e)return{from:t?.from,to:t?.to};if(!t)return{from:e.from,to:e.to};let n=e.from===void 0?t.from:t.from===void 0||e.from>t.from?e.from:t.from,r=e.to===void 0?t.to:t.to===void 0||e.to<t.to?e.to:t.to;return n!==void 0&&r!==void 0&&n>r?null:{from:n,to:r}}var Kw=[`sibling_of`,`friend_of`,`married_to`,`younger_than`,`older_than`,`parent_of`,`child_of`],qw=[`younger_than`,`older_than`,`located_in`];function Jw(e){return String(e??``).trim().toLowerCase()}function Yw(e){return e.object===void 0?Jw(e.value):Jw(e.object)}function Xw(e){let t=Yw(e),n=e.temporal?.from??``,r=e.temporal?.to??``;return[Jw(e.subject),e.predicate,t,n,r].join(`|`)}function Zw(e){let t=e.facts.map(Xw).sort();return[e.type,Jw(e.subject),Jw(e.predicate),...t].join(`|`)}function Qw(e,t,n){let r=Jw(n);return e.filter(e=>e.predicate===t&&e.object!==void 0&&e.object!==null&&Jw(e.subject)===r)}function $w(e,t){return t.every(t=>e.every(e=>Vw(e,t)))}function eT(e,t,n,r){let i=Jw(t),a=Jw(n);return i===a||tT(e,i).filter(e=>{if(e.length===0)return!1;let t=e[e.length-1];return Jw(t.object)===a}).some(e=>$w(e,r))}function tT(e,t){let n=[{entity:Jw(t),path:[]}],r=[],i=new Set;for(;n.length>0;){let t=n.shift();if(!t)continue;let{entity:a,path:o}=t,s=[a,...o.map(Xw)].join(`|`);if(!i.has(s)){i.add(s);for(let t of Qw(e,`located_in`,a)){if(lT(o,t))continue;let e=[...o,t];r.push(e),n.push({entity:Jw(t.object),path:e})}}}return r}function nT(e,t,n,r){let i=tT(e,t),a=tT(e,n),o=Jw(t),s=Jw(n);for(let e of i){if(e.length===0)continue;let t=Jw(e[e.length-1].object);if(t!==o&&t!==s&&$w(e,r))for(let e of a){if(e.length===0)continue;let n=Jw(e[e.length-1].object);if(n===t&&n!==o&&n!==s&&$w(e,r))return!0}}return!1}function rT(e,t,n){let r=Yw(t),i=Yw(n);return!!(r===i||eT(e,r,i,[t,n])||eT(e,i,r,[t,n])||nT(e,r,i,[t,n]))}function iT(e){let t=[];for(let n of Hw){let r=e.facts.filter(e=>e.predicate===n),i=Array.from(new Map(r.map(e=>[Xw(e),e])).values()),a=new Map;for(let e of i){let t=Jw(e.subject),n=a.get(t)??[];n.push(e),a.set(t,n)}for(let[r,i]of a)for(let a=0;a<i.length;a++)for(let o=a+1;o<i.length;o++){let s=i[a],c=i[o];Yw(s)!==Yw(c)&&(n===`located_in`&&rT(e.facts.filter(e=>e.predicate===`located_in`),s,c)||Vw(s,c)&&t.push({type:`conflicting_fact`,subject:r,predicate:n,facts:[s,c],message:`${r} hat widersprüchliche Angaben für "${n}".`}))}}return t}function aT(e,t){return e.object===void 0||e.object===null||t.object===void 0||t.object===null?!1:Jw(e.subject)===Jw(t.subject)&&Jw(e.object)===Jw(t.object)&&Vw(e,t)}function oT(e){let t=[];for(let[n,r]of Uw){let i=e.facts.filter(e=>e.predicate===n),a=e.facts.filter(e=>e.predicate===r);for(let e of i){if(e.object===void 0||e.object===null)continue;let i=a.find(t=>aT(e,t));i&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:n,facts:[e,i],message:`${e.subject} hat widersprüchliche Angaben: "${n}" und "${r}".`})}}return t}function sT(e){let t=[];for(let[n,r]of Object.entries(Ww)){if(n>r)continue;let i=e.facts.filter(e=>e.predicate===n),a=e.facts.filter(e=>e.predicate===r);for(let e of i){if(e.object===void 0||e.object===null)continue;let i=a.find(t=>{if(t.object===void 0||t.object===null)return!1;let n=Jw(e.subject)===Jw(t.subject),r=Jw(e.object)===Jw(t.object),i=Vw(e,t);return n&&r&&i});i&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[e,i],message:`${e.subject} kann nicht gleichzeitig "${n}" und "${r}" zu ${e.object} sein.`})}}return t}function cT(e){let t=[];for(let n of e.facts)Kw.includes(n.predicate)&&n.object!==void 0&&n.object!==null&&Jw(n.subject)===Jw(n.object)&&t.push({type:`conflicting_fact`,subject:n.subject,predicate:n.predicate,facts:[n],message:`${n.subject} kann nicht über "${n.predicate}" mit sich selbst in Beziehung stehen.`});return t}function lT(e,t){let n=Xw(t);return e.some(e=>Xw(e)===n)}function uT(e,t,n,r,i){let a=Jw(n),o=Jw(r),s=[{entity:a,path:[]}],c=new Set;for(;s.length>0;){let n=s.shift();if(!n)continue;let{entity:r,path:a}=n;if(r===o&&a.length>=2&&$w(a,[i]))return!0;let l=[r,...a.map(Xw)].join(`|`);if(!c.has(l)){c.add(l);for(let n of Qw(e,t,r))lT(a,n)||s.push({entity:Jw(n.object),path:[...a,n]})}}return!1}function dT(e,t,n,r){let i=Jw(n),a=[{entity:i,depth:0,temporal:r?.temporal}],o=new Set;for(;a.length>0;){let n=a.shift();if(!n)continue;let{entity:r,depth:s,temporal:c}=n;if(r===i&&s>=2)return!0;let l=`${r}|${s}|${c?.from??``}|${c?.to??``}`;if(!o.has(l)){o.add(l);for(let n of Qw(e,t,r)){let e=Gw(c,n.temporal);e!==null&&a.push({entity:Jw(n.object),depth:s+1,temporal:e})}}}return!1}function fT(e){return e===`younger_than`||e===`older_than`}function pT(e){return e===`younger_than`?`older_than`:`younger_than`}function mT(e,t){let n=[];if(!fT(t))return n;let r=e.facts.filter(e=>e.predicate===t),i=pT(t),a=e.facts.filter(e=>e.predicate===i);for(let e of r)if(e.object!==void 0&&e.object!==null)for(let o of a)o.object!==void 0&&o.object!==null&&Jw(e.subject)===Jw(o.subject)&&uT(r,t,e.subject,o.object,o)&&n.push({type:`conflicting_fact`,subject:e.subject,predicate:t,facts:[e,o],message:`${e.subject} hat widersprüchliche Altersbeziehungen: "${t}" und "${i}".`});return n}function hT(e){let t=[],n=e.facts.filter(e=>e.predicate===`age`&&e.value!==void 0&&typeof e.value==`number`),r=e.facts.filter(e=>e.predicate===`younger_than`||e.predicate===`older_than`);for(let e of r){if(e.object===void 0||e.object===null)continue;let r=n.find(t=>Jw(t.subject)===Jw(e.subject)&&Vw(t,e)),i=n.find(t=>Jw(t.subject)===Jw(e.object)&&Vw(t,e));if(!r||!i)continue;let a=Number(r.value),o=Number(i.value),s=!1;e.predicate===`younger_than`&&a>=o&&(s=!0),e.predicate===`older_than`&&a<=o&&(s=!0),s&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[r,i,e],message:`${e.subject} ist laut Altersangaben nicht "${e.predicate}" ${e.object}.`})}return t}function gT(e,t){let n=e.temporal?.from,r=t.temporal?.to;return!n||!r||n<=r}function _T(e){let t=[],n=e.facts.filter(e=>e.predicate===`age`&&typeof e.value==`number`),r=e.facts.filter(e=>fT(e.predicate)&&e.object!==void 0&&e.object!==null);for(let e of r){let r=Jw(e.subject),i=Jw(e.object),a=n.filter(e=>Jw(e.subject)===r),o=n.filter(e=>Jw(e.subject)===i);for(let n of a)for(let r of o){if(!Vw(n,r)||!gT(n,e)||!gT(r,e))continue;let i=Number(n.value),a=Number(r.value);(e.predicate===`younger_than`?i>=a:i<=a)&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[n,r,e],message:`${e.subject} kann nicht "${e.predicate}" ${e.object} sein, weil das Alter ${i} zu ${a} beträgt.`})}}return t}function vT(e){let t=[];for(let n of qw){let r=e.facts.filter(e=>e.predicate===n);for(let e of r)if(e.object!==void 0&&e.object!==null&&Jw(e.subject)!==Jw(e.object)&&dT(r,n,e.subject,e)){t.push({type:`conflicting_fact`,subject:e.subject,predicate:n,facts:[e],message:`${e.subject} ist in einem transitiven Zyklus für "${n}".`});break}t.push(...mT(e,n))}return t}function yT(e){let t=[];t.push(...iT(e)),t.push(...oT(e)),t.push(...sT(e)),t.push(...cT(e)),t.push(...vT(e)),t.push(...hT(e)),t.push(..._T(e));let n=new Map;for(let e of t){let t=Zw(e);n.has(t)||n.set(t,e)}return Array.from(n.values())}var bT=[{type:`paragraph`,children:[{text:`Hallo! Das ist mein Rich-Text-Editor.`}]}];function xT(e){return String(e??``).trim().toLowerCase()}function ST(e){return e.object!==void 0&&e.object!==null?String(e.object):e.value!==void 0&&e.value!==null?String(e.value):``}function CT({context:e}){let t=(0,x.useMemo)(()=>{let e=wh(gh(ou())),{isInline:t}=e;return e.isInline=e=>e.type===`link`||t(e),e},[]),[n,r]=(0,x.useState)([]),[i,a]=(0,x.useState)(null),[o,s]=(0,x.useState)(!1),[,c]=(0,x.useState)(``);function l(e){X.withoutNormalizing(t,()=>{t.children=e,t.selection={anchor:{path:[0,0],offset:0},focus:{path:[0,0],offset:0}}}),t.onChange()}function u(e,t){let n=[],r=Array.from(X.nodes(e,{at:[],match:e=>Us.isText(e)}));function i(e){let t=xT(e);if(!t)return[];let n=[];for(let[e,i]of r){if(!Us.isText(e))continue;let r=xT(e.text),a=0;for(;;){let o=r.indexOf(t,a);if(o===-1)break;n.push({path:i,start:o,end:o+t.length,text:e.text}),a=o+t.length}}return n}let a=new Set;function o(e){return[e.path.join(`.`),e.start,e.end].join(`:`)}function s(e,t){let n=e.path.join(`.`),r=t.path.join(`.`);return n===r?e.start-t.start:n.localeCompare(r,void 0,{numeric:!0})}for(let e of t){let t=i(e.subject),r=ST(e),c=r?i(r):[],l=t.sort(s).find(e=>!a.has(o(e)));if(!l)continue;let u=c.sort(s).find(e=>a.has(o(e))?!1:e.path.join(`.`)===l.path.join(`.`)?e.start>=l.end:s(e,l)>0);if(!u){let t=o(l);a.add(t),n.push({fact:e,range:{anchor:{path:l.path,offset:l.start},focus:{path:l.path,offset:l.end}}});continue}a.add(o(l)),a.add(o(u)),n.push({fact:e,range:{anchor:{path:l.path,offset:l.start},focus:{path:u.path,offset:u.end}}})}return n}function d(e,t={}){if(e.nodeType===Node.TEXT_NODE){let n=e.textContent??``;return n?[{text:n,...t}]:[]}if(e.nodeType!==Node.ELEMENT_NODE)return[];let n=e,r={...t};if((n.tagName===`STRONG`||n.tagName===`B`)&&(r.bold=!0),(n.tagName===`EM`||n.tagName===`I`)&&(r.italic=!0),n.tagName===`U`&&(r.underline=!0),n.tagName===`A`){let e=n.getAttribute(`href`);if(console.log(`FOUND LINK:`,{url:e,text:n.textContent,html:n.outerHTML}),!e)return Array.from(n.childNodes).flatMap(e=>d(e,r));let t=Array.from(n.childNodes).flatMap(e=>d(e,r)).filter(e=>`text`in e);return console.log(`LINK CHILDREN:`,t),[{type:`link`,url:e,children:t.length>0?t:[{text:n.textContent??``}]}]}let i=Array.from(n.childNodes).flatMap(e=>d(e,r));if(n.tagName===`H1`){let e=i.filter(e=>`text`in e);return[{type:`heading-one`,children:e.length>0?e:[{text:``}]}]}return n.tagName===`P`||n.tagName===`DIV`?[{type:`paragraph`,children:i.length>0?i:[{text:``}]}]:i}function f(e){let t=new DOMParser().parseFromString(e,`text/html`);return Array.from(t.body.childNodes).flatMap(e=>d(e))}function p(e){let t=f(e);t.length===0&&t.push({type:`paragraph`,children:[{text:``}]}),l(t)}function m(e){l(e.split(/\r?\n/).map(e=>({type:`paragraph`,children:[{text:e}]}))),console.log(`AFTER FILE LOAD`,{children:t.children,selection:t.selection})}async function h(){s(!0),c(``);try{let n=Bw(t.children);if(console.log(`editor-text: `,n),!n.trim()){c(`Der Editor ist leer.`);return}console.log(`vor extract`);let i=await zw(n,e);console.log(`=== EXTRACTED FACTS ===`),console.log(JSON.stringify(i,null,2)),console.log(`AGE FACTS:`,i.facts.filter(e=>e.predicate===`younger_than`||e.predicate===`older_than`)),a(i);let o=u(t,i.facts);console.log(`FACT OCCURRENCES:`,o);let s=yT(i);console.log(`INCONSISTENCIES:`,JSON.stringify(s,null,2)),r(s)}catch(e){console.error(e),c(e instanceof Error?e.message:`Unbekannter Fehler`)}finally{s(!1)}}return(0,U.jsxs)(`div`,{className:`editor-container`,children:[(0,U.jsxs)(hh,{editor:t,initialValue:bT,children:[(0,U.jsx)(wT,{onTextLoad:m,onHtmlLoad:p,onAnalyze:h,analyzing:o}),(0,U.jsx)(`div`,{className:`editor-scroll-container`,style:{minHeight:`200px`},children:(0,U.jsx)(ih,{className:`editor`,placeholder:`Text eingeben ...`,renderElement:kT,renderLeaf:AT,spellCheck:!0,onChange:()=>{console.log(`SLATE ONCHANGE:`,Bw(t.children))}})})]}),i&&(0,U.jsxs)(`div`,{className:`analysis-panel`,style:{minHeight:`200px`,maxHeight:`200px`,overflowY:`auto`},children:[(0,U.jsx)(`h2`,{children:`Extrahierte Fakten`}),i.facts.map((e,t)=>(0,U.jsxs)(`div`,{children:[(0,U.jsx)(`strong`,{children:e.subject}),` → `,(0,U.jsx)(`strong`,{children:e.predicate}),` → `,e.value===void 0?e.object:String(e.value)]},t))]}),n.length>0&&(0,U.jsxs)(`div`,{className:`analysis-inconsistencies`,style:{minHeight:`100px`,maxHeight:`100px`,overflowY:`auto`},children:[(0,U.jsx)(`h2`,{children:`Inkonsistenzen`}),n.map((e,t)=>(0,U.jsxs)(`div`,{children:[(0,U.jsx)(`p`,{children:(0,U.jsx)(`strong`,{children:e.message})}),(0,U.jsx)(`pre`,{children:JSON.stringify(e.facts,null,2)})]},t))]}),i&&n.length===0&&(0,U.jsx)(`div`,{children:(0,U.jsx)(`h2`,{children:`Keine Inkonsistenzen gefunden`})})]})}function wT(e){let t=(0,Co.c)(19),{onTextLoad:n,onHtmlLoad:r,onAnalyze:i,analyzing:a}=e,o,s,c,l,u,d;t[0]===Symbol.for(`react.memo_cache_sentinel`)?(o=(0,U.jsx)(TT,{format:`bold`,children:`B`}),s=(0,U.jsx)(TT,{format:`italic`,children:`I`}),c=(0,U.jsx)(TT,{format:`underline`,children:`U`}),l=(0,U.jsx)(DT,{format:`heading-one`,children:`H1`}),u=(0,U.jsx)(DT,{format:`paragraph`,children:`p`}),d=(0,U.jsx)(OT,{}),t[0]=o,t[1]=s,t[2]=c,t[3]=l,t[4]=u,t[5]=d):(o=t[0],s=t[1],c=t[2],l=t[3],u=t[4],d=t[5]);let f;t[6]!==r||t[7]!==n?(f=(0,U.jsx)(Nw,{onTextLoad:n,onHtmlLoad:r}),t[6]=r,t[7]=n,t[8]=f):f=t[8];let p;t[9]===Symbol.for(`react.memo_cache_sentinel`)?(p={color:`#2b311c`},t[9]=p):p=t[9];let m;t[10]===i?m=t[11]:(m=e=>{e.preventDefault(),i()},t[10]=i,t[11]=m);let h=a?`Analyzing...`:`Analyze Text`,g;t[12]!==a||t[13]!==h||t[14]!==m?(g=(0,U.jsx)(`button`,{type:`button`,style:p,onMouseDown:m,disabled:a,children:h}),t[12]=a,t[13]=h,t[14]=m,t[15]=g):g=t[15];let _;return t[16]!==g||t[17]!==f?(_=(0,U.jsxs)(`div`,{className:`toolbar`,children:[o,s,c,l,u,d,f,g]}),t[16]=g,t[17]=f,t[18]=_):_=t[18],_}function TT(e){let t=(0,Co.c)(6),{format:n,children:r}=e,i=Km(),a;t[0]!==i||t[1]!==n?(a=e=>{e.preventDefault(),ET(i,n)?X.removeMark(i,n):X.addMark(i,n,!0)},t[0]=i,t[1]=n,t[2]=a):a=t[2];let o;return t[3]!==r||t[4]!==a?(o=(0,U.jsx)(`button`,{type:`button`,onMouseDown:a,children:r}),t[3]=r,t[4]=a,t[5]=o):o=t[5],o}function ET(e,t){let n=X.marks(e);return n?n[t]===!0:!1}function DT(e){let t=(0,Co.c)(6),{format:n,children:r}=e,i=Km(),a;t[0]!==i||t[1]!==n?(a=e=>{e.preventDefault(),Q.setNodes(i,{type:n},{match:e=>Wo.isElement(e)&&X.isBlock(i,e)})},t[0]=i,t[1]=n,t[2]=a):a=t[2];let o;return t[3]!==r||t[4]!==a?(o=(0,U.jsx)(`button`,{type:`button`,onMouseDown:a,children:r}),t[3]=r,t[4]=a,t[5]=o):o=t[5],o}function OT(){let e=(0,Co.c)(2),t=Km(),n;return e[0]===t?n=e[1]:(n=(0,U.jsx)(`button`,{type:`button`,onMouseDown:e=>{e.preventDefault();let n=window.prompt(`URL:`);if(!n)return;let r={type:`link`,url:n,children:[{text:n}]};Q.insertNodes(t,r)},children:`Link`}),e[0]=t,e[1]=n),n}function kT({attributes:e,children:t,element:n}){switch(n.type){case`heading-one`:return(0,U.jsx)(`h1`,{...e,children:t});case`link`:return(0,U.jsx)(`a`,{...e,href:n.url,target:`_blank`,rel:`noopener noreferrer`,onMouseDown:e=>{(e.ctrlKey||e.metaKey)&&(e.preventDefault(),window.open(n.url,`_blank`,`noopener,noreferrer`))},style:{color:`blue`,textDecoration:`underline`,cursor:`pointer`},children:t});case`paragraph`:return(0,U.jsx)(`p`,{...e,children:t});default:return(0,U.jsx)(`p`,{...e,children:t})}}function AT({attributes:e,children:t,leaf:n}){return n.bold&&(t=(0,U.jsx)(`strong`,{children:t})),n.italic&&(t=(0,U.jsx)(`em`,{children:t})),n.underline&&(t=(0,U.jsx)(`u`,{children:t})),(0,U.jsx)(`span`,{...e,children:t})}function jT(){let e=(0,Co.c)(4),t;e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t={referenceDate:`2026-08-14`},e[0]=t):t=e[0];let n=t,r;e[1]===Symbol.for(`react.memo_cache_sentinel`)?(r={flowGrow:1},e[1]=r):r=e[1];let i;e[2]===Symbol.for(`react.memo_cache_sentinel`)?(i=(0,U.jsx)(bo,{container:!0,spacing:2,children:(0,U.jsx)(bo,{size:12,sx:{display:`flex`,justifyContent:`center`,alignItems:`center`},children:(0,U.jsx)(`h1`,{children:`Ripple Animation`})})}),e[2]=i):i=e[2];let a;return e[3]===Symbol.for(`react.memo_cache_sentinel`)?(a=(0,U.jsx)(U.Fragment,{children:(0,U.jsxs)(So,{sx:r,children:[i,(0,U.jsx)(bo,{container:!0,spacing:2,children:(0,U.jsx)(bo,{size:12,sx:{display:`flex`,justifyContent:`center`,alignItems:`center`,height:`720px`},children:(0,U.jsx)(CT,{context:n})})})]})}),e[3]=a):a=e[3],a}(0,S.createRoot)(document.getElementById(`root`)).render((0,U.jsx)(x.StrictMode,{children:(0,U.jsx)(jT,{})}));
+`)}function Vw(e,t){let n=e.temporal?.from,r=e.temporal?.to,i=t.temporal?.from,a=t.temporal?.to;return!n||!r||!i||!a||!(r<i||a<n)}var Hw=[`age`,`gender`,`born_in`,`lives_in`,`located_in`,`works_at`,`occupation`],Uw=[[`younger_than`,`older_than`]],Ww={parent_of:`child_of`,child_of:`parent_of`,owns:`has`,has:`owns`};function Gw(e,t){if(!e&&!t)return{};if(!e)return{from:t?.from,to:t?.to};if(!t)return{from:e.from,to:e.to};let n=e.from===void 0?t.from:t.from===void 0||e.from>t.from?e.from:t.from,r=e.to===void 0?t.to:t.to===void 0||e.to<t.to?e.to:t.to;return n!==void 0&&r!==void 0&&n>r?null:{from:n,to:r}}var Kw=[`sibling_of`,`friend_of`,`married_to`,`younger_than`,`older_than`,`parent_of`,`child_of`],qw=[`younger_than`,`older_than`,`located_in`];function Jw(e){return String(e??``).trim().toLowerCase()}function Yw(e){return e.object===void 0?Jw(e.value):Jw(e.object)}function Xw(e){let t=Yw(e),n=e.temporal?.from??``,r=e.temporal?.to??``;return[Jw(e.subject),e.predicate,t,n,r].join(`|`)}function Zw(e){let t=e.facts.map(Xw).sort();return[e.type,Jw(e.subject),Jw(e.predicate),...t].join(`|`)}function Qw(e,t,n){let r=Jw(n);return e.filter(e=>e.predicate===t&&e.object!==void 0&&e.object!==null&&Jw(e.subject)===r)}function $w(e,t){return t.every(t=>e.every(e=>Vw(e,t)))}function eT(e,t,n,r){let i=Jw(t),a=Jw(n);return i===a||tT(e,i).filter(e=>{if(e.length===0)return!1;let t=e[e.length-1];return Jw(t.object)===a}).some(e=>$w(e,r))}function tT(e,t){let n=[{entity:Jw(t),path:[]}],r=[],i=new Set;for(;n.length>0;){let t=n.shift();if(!t)continue;let{entity:a,path:o}=t,s=[a,...o.map(Xw)].join(`|`);if(!i.has(s)){i.add(s);for(let t of Qw(e,`located_in`,a)){if(lT(o,t))continue;let e=[...o,t];r.push(e),n.push({entity:Jw(t.object),path:e})}}}return r}function nT(e,t,n,r){let i=tT(e,t),a=tT(e,n),o=Jw(t),s=Jw(n);for(let e of i){if(e.length===0)continue;let t=Jw(e[e.length-1].object);if(t!==o&&t!==s&&$w(e,r))for(let e of a){if(e.length===0)continue;let n=Jw(e[e.length-1].object);if(n===t&&n!==o&&n!==s&&$w(e,r))return!0}}return!1}function rT(e,t,n){let r=Yw(t),i=Yw(n);return!!(r===i||eT(e,r,i,[t,n])||eT(e,i,r,[t,n])||nT(e,r,i,[t,n]))}function iT(e){let t=[];for(let n of Hw){let r=e.facts.filter(e=>e.predicate===n),i=Array.from(new Map(r.map(e=>[Xw(e),e])).values()),a=new Map;for(let e of i){let t=Jw(e.subject),n=a.get(t)??[];n.push(e),a.set(t,n)}for(let[r,i]of a)for(let a=0;a<i.length;a++)for(let o=a+1;o<i.length;o++){let s=i[a],c=i[o];Yw(s)!==Yw(c)&&(n===`located_in`&&rT(e.facts.filter(e=>e.predicate===`located_in`),s,c)||Vw(s,c)&&t.push({type:`conflicting_fact`,subject:r,predicate:n,facts:[s,c],message:`${r} hat widersprüchliche Angaben für "${n}".`}))}}return t}function aT(e,t){return e.object===void 0||e.object===null||t.object===void 0||t.object===null?!1:Jw(e.subject)===Jw(t.subject)&&Jw(e.object)===Jw(t.object)&&Vw(e,t)}function oT(e){let t=[];for(let[n,r]of Uw){let i=e.facts.filter(e=>e.predicate===n),a=e.facts.filter(e=>e.predicate===r);for(let e of i){if(e.object===void 0||e.object===null)continue;let i=a.find(t=>aT(e,t));i&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:n,facts:[e,i],message:`${e.subject} hat widersprüchliche Angaben: "${n}" und "${r}".`})}}return t}function sT(e){let t=[];for(let[n,r]of Object.entries(Ww)){if(n>r)continue;let i=e.facts.filter(e=>e.predicate===n),a=e.facts.filter(e=>e.predicate===r);for(let e of i){if(e.object===void 0||e.object===null)continue;let i=a.find(t=>{if(t.object===void 0||t.object===null)return!1;let n=Jw(e.subject)===Jw(t.subject),r=Jw(e.object)===Jw(t.object),i=Vw(e,t);return n&&r&&i});i&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[e,i],message:`${e.subject} kann nicht gleichzeitig "${n}" und "${r}" zu ${e.object} sein.`})}}return t}function cT(e){let t=[];for(let n of e.facts)Kw.includes(n.predicate)&&n.object!==void 0&&n.object!==null&&Jw(n.subject)===Jw(n.object)&&t.push({type:`conflicting_fact`,subject:n.subject,predicate:n.predicate,facts:[n],message:`${n.subject} kann nicht über "${n.predicate}" mit sich selbst in Beziehung stehen.`});return t}function lT(e,t){let n=Xw(t);return e.some(e=>Xw(e)===n)}function uT(e,t,n,r,i){let a=Jw(n),o=Jw(r),s=[{entity:a,path:[]}],c=new Set;for(;s.length>0;){let n=s.shift();if(!n)continue;let{entity:r,path:a}=n;if(r===o&&a.length>=2&&$w(a,[i]))return!0;let l=[r,...a.map(Xw)].join(`|`);if(!c.has(l)){c.add(l);for(let n of Qw(e,t,r))lT(a,n)||s.push({entity:Jw(n.object),path:[...a,n]})}}return!1}function dT(e,t,n,r){let i=Jw(n),a=[{entity:i,depth:0,temporal:r?.temporal}],o=new Set;for(;a.length>0;){let n=a.shift();if(!n)continue;let{entity:r,depth:s,temporal:c}=n;if(r===i&&s>=2)return!0;let l=`${r}|${s}|${c?.from??``}|${c?.to??``}`;if(!o.has(l)){o.add(l);for(let n of Qw(e,t,r)){let e=Gw(c,n.temporal);e!==null&&a.push({entity:Jw(n.object),depth:s+1,temporal:e})}}}return!1}function fT(e){return e===`younger_than`||e===`older_than`}function pT(e){return e===`younger_than`?`older_than`:`younger_than`}function mT(e,t){let n=[];if(!fT(t))return n;let r=e.facts.filter(e=>e.predicate===t),i=pT(t),a=e.facts.filter(e=>e.predicate===i);for(let e of r)if(e.object!==void 0&&e.object!==null)for(let o of a)o.object!==void 0&&o.object!==null&&Jw(e.subject)===Jw(o.subject)&&uT(r,t,e.subject,o.object,o)&&n.push({type:`conflicting_fact`,subject:e.subject,predicate:t,facts:[e,o],message:`${e.subject} hat widersprüchliche Altersbeziehungen: "${t}" und "${i}".`});return n}function hT(e){let t=[],n=e.facts.filter(e=>e.predicate===`age`&&e.value!==void 0&&typeof e.value==`number`),r=e.facts.filter(e=>e.predicate===`younger_than`||e.predicate===`older_than`);for(let e of r){if(e.object===void 0||e.object===null)continue;let r=n.find(t=>Jw(t.subject)===Jw(e.subject)&&Vw(t,e)),i=n.find(t=>Jw(t.subject)===Jw(e.object)&&Vw(t,e));if(!r||!i)continue;let a=Number(r.value),o=Number(i.value),s=!1;e.predicate===`younger_than`&&a>=o&&(s=!0),e.predicate===`older_than`&&a<=o&&(s=!0),s&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[r,i,e],message:`${e.subject} ist laut Altersangaben nicht "${e.predicate}" ${e.object}.`})}return t}function gT(e,t){let n=e.temporal?.from,r=t.temporal?.to;return!n||!r||n<=r}function _T(e){let t=[],n=e.facts.filter(e=>e.predicate===`age`&&typeof e.value==`number`),r=e.facts.filter(e=>fT(e.predicate)&&e.object!==void 0&&e.object!==null);for(let e of r){let r=Jw(e.subject),i=Jw(e.object),a=n.filter(e=>Jw(e.subject)===r),o=n.filter(e=>Jw(e.subject)===i);for(let n of a)for(let r of o){if(!Vw(n,r)||!gT(n,e)||!gT(r,e))continue;let i=Number(n.value),a=Number(r.value);(e.predicate===`younger_than`?i>=a:i<=a)&&t.push({type:`conflicting_fact`,subject:e.subject,predicate:e.predicate,facts:[n,r,e],message:`${e.subject} kann nicht "${e.predicate}" ${e.object} sein, weil das Alter ${i} zu ${a} beträgt.`})}}return t}function vT(e){let t=[];for(let n of qw){let r=e.facts.filter(e=>e.predicate===n);for(let e of r)if(e.object!==void 0&&e.object!==null&&Jw(e.subject)!==Jw(e.object)&&dT(r,n,e.subject,e)){t.push({type:`conflicting_fact`,subject:e.subject,predicate:n,facts:[e],message:`${e.subject} ist in einem transitiven Zyklus für "${n}".`});break}t.push(...mT(e,n))}return t}function yT(e){let t=[];t.push(...iT(e)),t.push(...oT(e)),t.push(...sT(e)),t.push(...cT(e)),t.push(...vT(e)),t.push(...hT(e)),t.push(..._T(e));let n=new Map;for(let e of t){let t=Zw(e);n.has(t)||n.set(t,e)}return Array.from(n.values())}var bT=12,xT=140,ST=.35;function CT(e){return Math.min(xT,Math.max(bT,e*ST))}function wT(e){return J.string(e).replace(/\s+/g,` `).trim()}function TT(e,t){let n=new Set(t.map(e=>e.join(`.`))),r=[];return e.forEach((e,t)=>{if(!Wo.isElement(e)||e.type!==`paragraph`&&e.type!==`heading-one`)return;let i=wT(e),a=[t];r.push({path:a,characterCount:i.length,hasInconsistency:n.has(a.join(`.`))})}),r}function ET(e){let t=(0,Co.c)(10),{document:n,inconsistentPaths:r,onNavigate:i}=e,a;t[0]!==n||t[1]!==r?(a=TT(n,r),t[0]=n,t[1]=r,t[2]=a):a=t[2];let o=a,s;if(t[3]!==o||t[4]!==i){let e;t[6]===i?e=t[7]:(e=e=>{let t=CT(e.characterCount);return(0,U.jsx)(`button`,{type:`button`,className:[`editor-navigation-segment`,e.hasInconsistency?`has-inconsistency`:``].filter(Boolean).join(` `),style:{height:`${t}px`},onClick:()=>i(e.path)},e.path.join(`-`))},t[6]=i,t[7]=e),s=o.map(e),t[3]=o,t[4]=i,t[5]=s}else s=t[5];let c;return t[8]===s?c=t[9]:(c=(0,U.jsx)(`nav`,{className:`editor-navigation`,"aria-label":`Dokumentübersicht`,children:(0,U.jsx)(`div`,{className:`editor-navigation-items`,children:s})}),t[8]=s,t[9]=c),c}var DT=[{type:`paragraph`,children:[{text:`Hallo! Das ist mein Rich-Text-Editor.`}]}];function OT(e){return String(e??``).trim().toLowerCase()}function kT({context:e}){let t=(0,x.useMemo)(()=>{let e=wh(gh(ou())),{isInline:t}=e;return e.isInline=e=>e.type===`link`||t(e),e},[]),[n,r]=(0,x.useState)([]),[i,a]=(0,x.useState)([]),[o,s]=(0,x.useState)(null),[c,l]=(0,x.useState)(!1),[,u]=(0,x.useState)(``),[d,f]=(0,x.useState)(DT);function p(e){X.withoutNormalizing(t,()=>{t.children=e,t.selection={anchor:{path:[0,0],offset:0},focus:{path:[0,0],offset:0}}}),f(e),t.onChange()}function m(e){return Us.isText(e)?e.text:Wo.isElement(e)?e.children.map(e=>m(e)).join(``):``}function h(e,t){let n=[];for(let r of t){let t=r.facts.find(e=>OT(e.subject)===OT(r.subject)&&OT(e.predicate)===OT(r.predicate));if(!t)continue;let i=OT(t.subject),a=t.object===void 0?``:OT(t.object);for(let t=0;t<e.children.length;t++){let r=e.children[t];if(!Wo.isElement(r)||r.type!==`paragraph`&&r.type!==`heading-one`)continue;let o=OT(m(r)),s=i!==``&&o.includes(i),c=a!==``&&o.includes(a);if(s&&c){let e=[t];n.some(t=>t.join(`.`)===e.join(`.`))||n.push(e);break}}}return n}function g(e,t={}){if(e.nodeType===Node.TEXT_NODE){let n=e.textContent??``;return n?[{text:n,...t}]:[]}if(e.nodeType!==Node.ELEMENT_NODE)return[];let n=e,r={...t};if((n.tagName===`STRONG`||n.tagName===`B`)&&(r.bold=!0),(n.tagName===`EM`||n.tagName===`I`)&&(r.italic=!0),n.tagName===`U`&&(r.underline=!0),n.tagName===`A`){let e=n.getAttribute(`href`);if(console.log(`FOUND LINK:`,{url:e,text:n.textContent,html:n.outerHTML}),!e)return Array.from(n.childNodes).flatMap(e=>g(e,r));let t=Array.from(n.childNodes).flatMap(e=>g(e,r)).filter(e=>`text`in e);return console.log(`LINK CHILDREN:`,t),[{type:`link`,url:e,children:t.length>0?t:[{text:n.textContent??``}]}]}let i=Array.from(n.childNodes).flatMap(e=>g(e,r));if(n.tagName===`H1`){let e=i.filter(e=>`text`in e);return[{type:`heading-one`,children:e.length>0?e:[{text:``}]}]}return n.tagName===`P`||n.tagName===`DIV`?[{type:`paragraph`,children:i.length>0?i:[{text:``}]}]:i}function _(e){let t=new DOMParser().parseFromString(e,`text/html`);return Array.from(t.body.childNodes).flatMap(e=>g(e))}function v(e){let t=_(e);t.length===0&&t.push({type:`paragraph`,children:[{text:``}]}),p(t)}function y(e){p(e.split(/\r?\n/).map(e=>({type:`paragraph`,children:[{text:e}]}))),console.log(`AFTER FILE LOAD`,{children:t.children,selection:t.selection})}async function b(){l(!0),u(``);try{let n=Bw(t.children);if(console.log(`editor-text: `,n),!n.trim()){u(`Der Editor ist leer.`);return}let i=await zw(n,e);s(i);let o=yT(i);r(o);let c=h(t,o);a(c)}catch(e){console.error(e),u(e instanceof Error?e.message:`Unbekannter Fehler`)}finally{l(!1)}}return(0,U.jsxs)(`div`,{className:`content-container`,children:[(0,U.jsx)(`div`,{className:`editor-navigation-container`,children:(0,U.jsx)(ET,{document:d,inconsistentPaths:i,onNavigate:e=>{try{let n=X.start(t,e);Q.select(t,{anchor:n,focus:n}),$.focus(t),$.toDOMNode(t,X.node(t,e)[0]).scrollIntoView({behavior:`smooth`,block:`center`})}catch(e){console.error(`Navigation zum Absatz fehlgeschlagen:`,e)}}})}),(0,U.jsxs)(`div`,{className:`editor-container`,children:[(0,U.jsxs)(hh,{editor:t,initialValue:DT,children:[(0,U.jsx)(AT,{onTextLoad:y,onHtmlLoad:v,onAnalyze:b,analyzing:c}),(0,U.jsx)(`div`,{className:`editor-scroll-container`,style:{minHeight:`200px`},children:(0,U.jsx)(ih,{className:`editor`,placeholder:`Text eingeben ...`,renderElement:FT,renderLeaf:IT,spellCheck:!0,onChange:()=>{f([...t.children]),console.log(`SLATE ONCHANGE:`,Bw(t.children))}})})]}),o&&(0,U.jsxs)(`div`,{className:`analysis-panel`,style:{minHeight:`200px`,maxHeight:`200px`,overflowY:`auto`},children:[(0,U.jsx)(`h2`,{children:`Extrahierte Fakten`}),o.facts.map((e,t)=>(0,U.jsxs)(`div`,{children:[(0,U.jsx)(`strong`,{children:e.subject}),` → `,(0,U.jsx)(`strong`,{children:e.predicate}),` → `,e.value===void 0?e.object:String(e.value)]},t))]}),n.length>0&&(0,U.jsxs)(`div`,{className:`analysis-inconsistencies`,style:{minHeight:`100px`,maxHeight:`100px`,overflowY:`auto`},children:[(0,U.jsx)(`h2`,{children:`Inkonsistenzen`}),n.map((e,t)=>(0,U.jsxs)(`div`,{children:[(0,U.jsx)(`p`,{children:(0,U.jsx)(`strong`,{children:e.message})}),(0,U.jsx)(`pre`,{children:JSON.stringify(e.facts,null,2)})]},t))]}),o&&n.length===0&&(0,U.jsx)(`div`,{children:(0,U.jsx)(`h2`,{children:`Keine Inkonsistenzen gefunden`})})]})]})}function AT(e){let t=(0,Co.c)(19),{onTextLoad:n,onHtmlLoad:r,onAnalyze:i,analyzing:a}=e,o,s,c,l,u,d;t[0]===Symbol.for(`react.memo_cache_sentinel`)?(o=(0,U.jsx)(jT,{format:`bold`,children:`B`}),s=(0,U.jsx)(jT,{format:`italic`,children:`I`}),c=(0,U.jsx)(jT,{format:`underline`,children:`U`}),l=(0,U.jsx)(NT,{format:`heading-one`,children:`H1`}),u=(0,U.jsx)(NT,{format:`paragraph`,children:`p`}),d=(0,U.jsx)(PT,{}),t[0]=o,t[1]=s,t[2]=c,t[3]=l,t[4]=u,t[5]=d):(o=t[0],s=t[1],c=t[2],l=t[3],u=t[4],d=t[5]);let f;t[6]!==r||t[7]!==n?(f=(0,U.jsx)(Nw,{onTextLoad:n,onHtmlLoad:r}),t[6]=r,t[7]=n,t[8]=f):f=t[8];let p;t[9]===Symbol.for(`react.memo_cache_sentinel`)?(p={color:`#2b311c`},t[9]=p):p=t[9];let m;t[10]===i?m=t[11]:(m=e=>{e.preventDefault(),i()},t[10]=i,t[11]=m);let h=a?`Analyzing...`:`Analyze Text`,g;t[12]!==a||t[13]!==h||t[14]!==m?(g=(0,U.jsx)(`button`,{type:`button`,style:p,onMouseDown:m,disabled:a,children:h}),t[12]=a,t[13]=h,t[14]=m,t[15]=g):g=t[15];let _;return t[16]!==g||t[17]!==f?(_=(0,U.jsxs)(`div`,{className:`toolbar`,children:[o,s,c,l,u,d,f,g]}),t[16]=g,t[17]=f,t[18]=_):_=t[18],_}function jT(e){let t=(0,Co.c)(6),{format:n,children:r}=e,i=Km(),a;t[0]!==i||t[1]!==n?(a=e=>{e.preventDefault(),MT(i,n)?X.removeMark(i,n):X.addMark(i,n,!0)},t[0]=i,t[1]=n,t[2]=a):a=t[2];let o;return t[3]!==r||t[4]!==a?(o=(0,U.jsx)(`button`,{type:`button`,onMouseDown:a,children:r}),t[3]=r,t[4]=a,t[5]=o):o=t[5],o}function MT(e,t){let n=X.marks(e);return n?n[t]===!0:!1}function NT(e){let t=(0,Co.c)(6),{format:n,children:r}=e,i=Km(),a;t[0]!==i||t[1]!==n?(a=e=>{e.preventDefault(),Q.setNodes(i,{type:n},{match:e=>Wo.isElement(e)&&X.isBlock(i,e)})},t[0]=i,t[1]=n,t[2]=a):a=t[2];let o;return t[3]!==r||t[4]!==a?(o=(0,U.jsx)(`button`,{type:`button`,onMouseDown:a,children:r}),t[3]=r,t[4]=a,t[5]=o):o=t[5],o}function PT(){let e=(0,Co.c)(2),t=Km(),n;return e[0]===t?n=e[1]:(n=(0,U.jsx)(`button`,{type:`button`,onMouseDown:e=>{e.preventDefault();let n=window.prompt(`URL:`);if(!n)return;let r={type:`link`,url:n,children:[{text:n}]};Q.insertNodes(t,r)},children:`Link`}),e[0]=t,e[1]=n),n}function FT({attributes:e,children:t,element:n}){switch(n.type){case`heading-one`:return(0,U.jsx)(`h1`,{...e,children:t});case`link`:return(0,U.jsx)(`a`,{...e,href:n.url,target:`_blank`,rel:`noopener noreferrer`,onMouseDown:e=>{(e.ctrlKey||e.metaKey)&&(e.preventDefault(),window.open(n.url,`_blank`,`noopener,noreferrer`))},style:{color:`blue`,textDecoration:`underline`,cursor:`pointer`},children:t});case`paragraph`:return(0,U.jsx)(`p`,{...e,children:t});default:return(0,U.jsx)(`p`,{...e,children:t})}}function IT({attributes:e,children:t,leaf:n}){return n.bold&&(t=(0,U.jsx)(`strong`,{children:t})),n.italic&&(t=(0,U.jsx)(`em`,{children:t})),n.underline&&(t=(0,U.jsx)(`u`,{children:t})),(0,U.jsx)(`span`,{...e,children:t})}function LT(){let e=(0,Co.c)(4),t;e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t={referenceDate:`2026-08-14`},e[0]=t):t=e[0];let n=t,r;e[1]===Symbol.for(`react.memo_cache_sentinel`)?(r={flowGrow:1},e[1]=r):r=e[1];let i;e[2]===Symbol.for(`react.memo_cache_sentinel`)?(i=(0,U.jsx)(bo,{container:!0,spacing:2,children:(0,U.jsx)(bo,{size:12,sx:{display:`flex`,justifyContent:`center`,alignItems:`center`},children:(0,U.jsx)(`h1`,{children:`Ripple Animation`})})}),e[2]=i):i=e[2];let a;return e[3]===Symbol.for(`react.memo_cache_sentinel`)?(a=(0,U.jsx)(U.Fragment,{children:(0,U.jsxs)(So,{sx:r,children:[i,(0,U.jsx)(bo,{container:!0,spacing:2,children:(0,U.jsx)(bo,{size:12,sx:{display:`flex`,justifyContent:`center`,alignItems:`center`,height:`720px`},children:(0,U.jsx)(kT,{context:n})})})]})}),e[3]=a):a=e[3],a}(0,S.createRoot)(document.getElementById(`root`)).render((0,U.jsx)(x.StrictMode,{children:(0,U.jsx)(LT,{})}));
