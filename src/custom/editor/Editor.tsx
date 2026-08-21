@@ -18,7 +18,7 @@ import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
 import { extractFacts } from "./../../analysis/extractesFacts";
-import type { Fact, FactExtraction } from "./../../types/facts";
+import type { FactExtraction } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
@@ -27,19 +27,6 @@ import {
 import EditorNavigation from "./EditorNavigation";
 
 import type { StoryContext } from "../../types/story";
-
-type SlatePoint = {
-  path: number[];
-  offset: number;
-};
-
-type FactOccurrence = {
-  fact: Fact;
-  range: {
-    anchor: SlatePoint;
-    focus: SlatePoint;
-  };
-};
 
 type CustomText = {
   text: string;
@@ -94,24 +81,6 @@ function normalizeSearchText(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toLowerCase();
-}
-
-function getFactObjectText(fact: Fact): string {
-  if (
-    fact.object !== undefined &&
-    fact.object !== null
-  ) {
-    return String(fact.object);
-  }
-
-  if (
-    fact.value !== undefined &&
-    fact.value !== null
-  ) {
-    return String(fact.value);
-  }
-
-  return "";
 }
 
 
