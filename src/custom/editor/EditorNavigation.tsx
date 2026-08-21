@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Node, type Descendant } from "slate";
+import { Node, type Descendant,Element as SlateElement } from "slate";
 import type { Inconsistency } from "../../ai/consistencyChecker";
 import type { Fact } from "../../types/facts";
 import './../../assets/css/editorNav.css';
@@ -11,25 +11,9 @@ type NavigationSegment = {
 };
 
 type EditorNavigationProps = {
-  /**
-   * Die aktuelle Slate-Dokumentstruktur.
-   * Die Komponente selbst muss nicht innerhalb von <Slate> liegen.
-   */
   document: Descendant[];
-
-  /**
-   * Inkonsistenzen aus der bestehenden Konsistenzanalyse.
-   */
-  inconsistencies?: Inconsistency[];
-
-  /**
-   * Wird beim Anklicken eines Segments mit dem Slate-Path aufgerufen.
-   * Die eigentliche Navigation zum Slate-Element bleibt damit außerhalb
-   * dieser rein visuellen Komponente.
-   */
-  onNavigate?: (path: number[]) => void;
-
-  className?: string;
+  inconsistentPaths: number[][];
+  onNavigate: (path: number[]) => void;
 };
 
 const MIN_HEIGHT = 12;
@@ -98,63 +82,74 @@ function paragraphHasInconsistency(
 
 function createNavigationSegments(
   document: Descendant[],
-  inconsistencies: Inconsistency[]
+  inconsistentPaths: number[][]
 ): NavigationSegment[] {
-  return document
-    .map((node, index) => {
-      const text = getNodeText(node);
+  const inconsistentPathSet = new Set(
+    inconsistentPaths.map((path) =>
+      path.join(".")
+    )
+  );
 
-      return {
-        path: [index],
-        characterCount: text.length,
-        hasInconsistency: paragraphHasInconsistency(
-          text,
-          inconsistencies
-        ),
-      };
+  const items: NavigationSegment[] = [];
+
+  document.forEach((node, index) => {
+    if (!SlateElement.isElement(node)) {
+      return;
+    }
+
+    if (
+      node.type !== "paragraph" &&
+      node.type !== "heading-one"
+    ) {
+      return;
+    }
+
+    const text = getNodeText(node);
+    const path = [index];
+
+    items.push({
+      path,
+      characterCount: text.length,
+      hasInconsistency: inconsistentPathSet.has(
+        path.join(".")
+      ),
     });
-}
+  });
 
+  return items;
+}
 export default function EditorNavigation({
   document,
-  inconsistencies = [],
+  inconsistentPaths,
   onNavigate,
-  className,
 }: EditorNavigationProps) {
-  const segments = useMemo(
+  const items = useMemo(
     () =>
       createNavigationSegments(
         document,
-        inconsistencies
+        inconsistentPaths
       ),
-    [document, inconsistencies]
+    [document, inconsistentPaths]
   );
 
   return (
     <nav
-      className={
-        className ?? "editor-navigation"
-      }
+      className="editor-navigation"
       aria-label="Dokumentübersicht"
     >
       <div className="editor-navigation-items">
-        {segments.map((segment) => {
+        {items.map((item) => {
           const height = getSegmentHeight(
-            segment.characterCount
+            item.characterCount
           );
 
           return (
             <button
-              key={segment.path.join("-")}
+              key={item.path.join("-")}
               type="button"
-              aria-label={
-                segment.hasInconsistency
-                  ? "Absatz mit Inkonsistenz"
-                  : "Absatz"
-              }
               className={[
                 "editor-navigation-segment",
-                segment.hasInconsistency
+                item.hasInconsistency
                   ? "has-inconsistency"
                   : "",
               ]
@@ -163,9 +158,7 @@ export default function EditorNavigation({
               style={{
                 height: `${height}px`,
               }}
-              onClick={() =>
-                onNavigate?.(segment.path)
-              }
+              onClick={() => onNavigate(item.path)}
             />
           );
         })}

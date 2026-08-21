@@ -134,6 +134,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   }, []);
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
+  const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
 
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -143,6 +144,10 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [, setAnalysisError] = useState("");
 
   const [document, setDocument] = useState<Descendant[]>(initialValue);
+
+  function getBlockPath(path: number[]): number[] {
+    return [path[0]];
+  }
 
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
@@ -391,6 +396,117 @@ function findFactOccurrences(
   return occurrences;
 }
 
+function getNodeText(node: Descendant): string {
+  if (Text.isText(node)) {
+    return node.text;
+  }
+
+  if (SlateElement.isElement(node)) {
+    return node.children
+      .map((child) => getNodeText(child))
+      .join("");
+  }
+
+  return "";
+}
+
+function getInconsistentPaths(
+  editor: Editor,
+  inconsistencies: Inconsistency[]
+): number[][] {
+  const paths: number[][] = [];
+
+  for (const inconsistency of inconsistencies) {
+    const conflictingFact =
+      inconsistency.facts.find(
+        (fact) =>
+          normalizeSearchText(fact.subject) ===
+            normalizeSearchText(
+              inconsistency.subject
+            ) &&
+          normalizeSearchText(fact.predicate) ===
+            normalizeSearchText(
+              inconsistency.predicate
+            )
+      );
+
+    if (!conflictingFact) {
+      continue;
+    }
+
+    const subject = normalizeSearchText(
+      conflictingFact.subject
+    );
+
+    const object =
+      conflictingFact.object !== undefined
+        ? normalizeSearchText(
+            conflictingFact.object
+          )
+        : "";
+
+    /*
+     * Suche den Absatz, in dem die inkonsistente
+     * Aussage tatsächlich vorkommt.
+     */
+    for (
+      let index = 0;
+      index < editor.children.length;
+      index++
+    ) {
+      const node = editor.children[index];
+
+      if (!SlateElement.isElement(node)) {
+        continue;
+      }
+
+      if (
+        node.type !== "paragraph" &&
+        node.type !== "heading-one"
+      ) {
+        continue;
+      }
+
+      const text = normalizeSearchText(
+        getNodeText(node)
+      );
+
+      const hasSubject =
+        subject !== "" &&
+        text.includes(subject);
+
+      const hasObject =
+        object !== "" &&
+        text.includes(object);
+
+      /*
+       * Bei einer Relation müssen beide
+       * Entitäten im selben Absatz vorkommen.
+       */
+      if (
+        hasSubject &&
+        hasObject
+      ) {
+        const path = [index];
+
+        if (
+          !paths.some(
+            (existingPath) =>
+              existingPath.join(".") ===
+              path.join(".")
+          )
+        ) {
+          paths.push(path);
+        }
+
+        break;
+      }
+    }
+  }
+
+  return paths;
+}
+
 
 function deserialize(
   node: Node,
@@ -627,6 +743,26 @@ function deserialize(
 
       setInconsistencies(foundInconsistencies);
 
+      console.log(
+        "FACT OCCURRENCES:",
+        occurrences.map((occurrence) => ({
+          fact: occurrence.fact,
+          path: occurrence.range.anchor.path,
+        }))
+      );
+
+      const paths = getInconsistentPaths(
+        editor,
+        foundInconsistencies
+      );
+
+      console.log(
+        "INCONSISTENT PATHS:",
+        paths
+      );
+
+      setInconsistentPaths(paths);
+
     } catch (error) {
       console.error(error);
 
@@ -645,7 +781,7 @@ function deserialize(
       <div className="editor-navigation-container">
         <EditorNavigation
         document={document}
-        inconsistencies={inconsistencies}
+        inconsistentPaths={inconsistentPaths}
         onNavigate={(path) => {
           try {
             const point = Editor.start(editor, path);

@@ -7,12 +7,12 @@
 }
 
 .editor-navigation-container{
-  padding-top: 40px;
+  padding-top: 24px;
   left: 40px;
 }
 
 .editor-container {
-  width: 80%;
+  width: 90%;
   max-height: 720px;
   min-height: 720px;
   margin: 24px;
