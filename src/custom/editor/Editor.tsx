@@ -1,8 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   createEditor,
+  type BaseRange,
+  type DecoratedRange,
   type Descendant,
   Editor,
+  type NodeEntry,
+  Path,
   Text,
   Element as SlateElement,
   Transforms,
@@ -33,6 +37,7 @@ type CustomText = {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  inconsistent?: boolean;
 };
 
 type LinkElement = {
@@ -51,7 +56,7 @@ type HeadingElement = {
   children: CustomText[];
 };
 
-type MarkFormat = Exclude<keyof CustomText, "text">;
+type MarkFormat = Exclude<keyof CustomText, "text" | "inconsistent">;
 
 type CustomElement =
   | ParagraphElement
@@ -63,6 +68,7 @@ declare module "slate" {
     TextEditor: Editor;
     Element: CustomElement;
     Text: CustomText;
+    Range: BaseRange & { inconsistent?: boolean };
   }
 }
 
@@ -113,6 +119,31 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [, setAnalysisError] = useState("");
 
   const [document, setDocument] = useState<Descendant[]>(initialValue);
+
+  const decorateInconsistencies = useCallback(
+    ([node, path]: NodeEntry): DecoratedRange[] => {
+      if (!Text.isText(node)) {
+        return [];
+      }
+
+      const belongsToInconsistentBlock = inconsistentPaths.some(
+        (inconsistentPath) => Path.isAncestor(inconsistentPath, path)
+      );
+
+      if (!belongsToInconsistentBlock || node.text.length === 0) {
+        return [];
+      }
+
+      return [
+        {
+          anchor: { path, offset: 0 },
+          focus: { path, offset: node.text.length },
+          inconsistent: true,
+        },
+      ];
+    },
+    [inconsistentPaths]
+  );
 
   
   function replaceEditorContent(nodes: Descendant[]) {
@@ -533,6 +564,7 @@ function deserialize(
             placeholder="Text eingeben ..."
             renderElement={renderElement}
             renderLeaf={renderLeaf}
+            decorate={decorateInconsistencies}
             spellCheck
             onChange={() => {
               setDocument([...editor.children]);
@@ -831,7 +863,10 @@ function renderLeaf({
   }
 
   return (
-    <span {...attributes}>
+    <span
+      {...attributes}
+      className={leaf.inconsistent ? "inconsistent-text" : undefined}
+    >
       {children}
     </span>
   );

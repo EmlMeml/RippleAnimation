@@ -82,6 +82,42 @@
   margin: 0 0 1em;
 }
 
+.editor .inconsistent-text {
+  display: inline-block;
+  background-color: #fecaca;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  animation: inconsistency-jitter 1s ease-in-out;
+}
+
+@keyframes inconsistency-jitter {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-3px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor .inconsistent-text {
+    animation: none;
+  }
+}
+
 .editor-scroll-container{
   flex: 1;
   min-height: 0;
