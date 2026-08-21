@@ -145,10 +145,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [document, setDocument] = useState<Descendant[]>(initialValue);
 
-  function getBlockPath(path: number[]): number[] {
-    return [path[0]];
-  }
-
+  
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
       editor.children = nodes;
@@ -706,20 +703,8 @@ function deserialize(
         setAnalysisError("Der Editor ist leer.");
         return;
       }
-      console.log("vor extract");
+     
       const result = await extractFacts(text,context);
-
-      console.log("=== EXTRACTED FACTS ===");
-      console.log(JSON.stringify(result, null, 2));
-
-      console.log(
-        "AGE FACTS:",
-        result.facts.filter(
-          f =>
-            f.predicate === "younger_than" ||
-            f.predicate === "older_than"
-        )
-      );
 
       setAnalysis(result);
 
@@ -728,37 +713,14 @@ function deserialize(
         result.facts
       );
 
-      console.log(
-        "FACT OCCURRENCES:",
-        occurrences
-      );
-
       const foundInconsistencies =
         checkConsistency(result);
 
-      console.log(
-        "INCONSISTENCIES:",
-        JSON.stringify(foundInconsistencies, null, 2)
-      );
-
       setInconsistencies(foundInconsistencies);
-
-      console.log(
-        "FACT OCCURRENCES:",
-        occurrences.map((occurrence) => ({
-          fact: occurrence.fact,
-          path: occurrence.range.anchor.path,
-        }))
-      );
 
       const paths = getInconsistentPaths(
         editor,
         foundInconsistencies
-      );
-
-      console.log(
-        "INCONSISTENT PATHS:",
-        paths
       );
 
       setInconsistentPaths(paths);

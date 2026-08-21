@@ -1,7 +1,5 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { Node, type Descendant,Element as SlateElement } from "slate";
-import type { Inconsistency } from "../../ai/consistencyChecker";
-import type { Fact } from "../../types/facts";
 import './../../assets/css/editorNav.css';
 
 type NavigationSegment = {
@@ -32,52 +30,6 @@ function getSegmentHeight(characterCount: number): number {
 
 function getNodeText(node: Descendant): string {
   return Node.string(node).replace(/\s+/g, " ").trim();
-}
-
-function getFactText(fact: Fact): string[] {
-  const values: string[] = [];
-
-  if (fact.subject !== undefined && fact.subject !== null) {
-    values.push(String(fact.subject));
-  }
-
-  if (fact.object !== undefined && fact.object !== null) {
-    values.push(String(fact.object));
-  }
-
-  if (fact.value !== undefined && fact.value !== null) {
-    values.push(String(fact.value));
-  }
-
-  return values
-    .map((value) => value.trim())
-    .filter(Boolean);
-}
-
-function paragraphContainsFact(
-  paragraphText: string,
-  fact: Fact
-): boolean {
-  const normalizedParagraph = paragraphText.toLowerCase();
-
-  return getFactText(fact).some((factText) =>
-    normalizedParagraph.includes(factText.toLowerCase())
-  );
-}
-
-function paragraphHasInconsistency(
-  paragraphText: string,
-  inconsistencies: Inconsistency[]
-): boolean {
-  if (!paragraphText) {
-    return false;
-  }
-
-  return inconsistencies.some((inconsistency) =>
-    inconsistency.facts.some((fact) =>
-      paragraphContainsFact(paragraphText, fact)
-    )
-  );
 }
 
 function createNavigationSegments(
