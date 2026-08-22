@@ -1,5 +1,5 @@
 .editor-navigation {
-  width: 24px;
+  width: 36px;
   height: 100%;
 }
 
@@ -7,7 +7,19 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  height: 720px;
+  height: 93%;
+  background-color: rgb(255, 255, 255);
+  padding: 8px;
+  border: 2px #b7c396 solid;
+  border-radius: 0px 0px 8px 8px;
+}
+
+.editor-navigation-header{
+  background-color: #b7c396;
+  padding:8px;
+  min-height: 40px;
+  border-radius: 8px 8px 0px 0px;
+
 }
 
 .editor-navigation-segment {

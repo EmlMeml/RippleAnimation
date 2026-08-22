@@ -15,8 +15,8 @@ type EditorNavigationProps = {
 };
 
 const MIN_HEIGHT = 12;
-const MAX_HEIGHT = 140;
-const HEIGHT_PER_CHARACTER = 0.35;
+const MAX_HEIGHT = 240;
+const HEIGHT_PER_CHARACTER = 0.36;
 
 function getSegmentHeight(characterCount: number): number {
   return Math.min(
@@ -89,6 +89,8 @@ export default function EditorNavigation({
       className="editor-navigation"
       aria-label="Dokumentübersicht"
     >
+      <div className="editor-navigation-header">
+        </div>
       <div className="editor-navigation-items">
         {items.map((item) => {
           const height = getSegmentHeight(
