@@ -1,5 +1,5 @@
 .editor-navigation {
-  width: 36px;
+  width: 88px;
   height: 100%;
 }
 
@@ -19,7 +19,9 @@
   padding:8px;
   min-height: 40px;
   border-radius: 8px 8px 0px 0px;
-
+  font-size: 14px;
+  font-weight: bold;
+  color: white;
 }
 
 .editor-navigation-segment {

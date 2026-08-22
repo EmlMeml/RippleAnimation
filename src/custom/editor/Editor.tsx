@@ -5,6 +5,7 @@ import {
   type DecoratedRange,
   type Descendant,
   Editor,
+  Node as SlateNode,
   type NodeEntry,
   Path,
   Text,
@@ -57,6 +58,10 @@ type HeadingElement = {
 };
 
 type MarkFormat = Exclude<keyof CustomText, "text" | "inconsistent">;
+type InconsistentTextRange = BaseRange & {
+  inconsistent: true;
+  inconsistencyRole: "conflict" | "context";
+};
 
 type CustomElement =
   | ParagraphElement
@@ -68,7 +73,10 @@ declare module "slate" {
     TextEditor: Editor;
     Element: CustomElement;
     Text: CustomText;
-    Range: BaseRange & { inconsistent?: boolean };
+    Range: BaseRange & {
+      inconsistent?: boolean;
+      inconsistencyRole?: "conflict" | "context";
+    };
   }
 }
 
@@ -110,6 +118,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
   const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
+  const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
 
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -126,23 +135,11 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         return [];
       }
 
-      const belongsToInconsistentBlock = inconsistentPaths.some(
-        (inconsistentPath) => Path.isAncestor(inconsistentPath, path)
+      return inconsistentRanges.filter((range) =>
+        Path.equals(range.anchor.path, path)
       );
-
-      if (!belongsToInconsistentBlock || node.text.length === 0) {
-        return [];
-      }
-
-      return [
-        {
-          anchor: { path, offset: 0 },
-          focus: { path, offset: node.text.length },
-          inconsistent: true,
-        },
-      ];
     },
-    [inconsistentPaths]
+    [inconsistentRanges]
   );
 
   
@@ -281,6 +278,105 @@ function getInconsistentPaths(
   }
 
   return paths;
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getFactHighlightPattern(
+  fact: Inconsistency["facts"][number]
+): RegExp | null {
+  const relationPatterns: Partial<Record<
+    Inconsistency["facts"][number]["predicate"],
+    string
+  >> = {
+    younger_than: "younger|jünger",
+    older_than: "older|älter",
+    sibling_of: "brother|sister|sibling|bruder|schwester|geschwister",
+    parent_of: "parent|mother|father|elternteil|mutter|vater",
+    child_of: "child|son|daughter|kind|sohn|tochter",
+    married_to: "married|husband|wife|verheiratet|ehemann|ehefrau",
+    friend_of: "friend|freund(?:in)?",
+    owns: "owns|owner|besitzt|gehört",
+    has: "has|hat",
+  };
+
+  const relationPattern = relationPatterns[fact.predicate];
+  if (relationPattern) {
+    return new RegExp(`\\b(?:${relationPattern})\\b`, "gi");
+  }
+
+  const value = fact.object ?? fact.value;
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  return new RegExp(`\\b${escapeForRegExp(String(value))}\\b`, "gi");
+}
+
+function getInconsistentTextRanges(
+  editor: Editor,
+  inconsistencies: Inconsistency[]
+): InconsistentTextRange[] {
+  const ranges: InconsistentTextRange[] = [];
+
+  for (const inconsistency of inconsistencies) {
+    const conflictFact = [...inconsistency.facts].sort(
+      (first, second) =>
+        (first.source?.start ?? 0) - (second.source?.start ?? 0)
+    ).at(-1);
+
+    for (const fact of inconsistency.facts) {
+      const pattern = getFactHighlightPattern(fact);
+      if (!pattern) {
+        continue;
+      }
+
+      for (const [node, path] of SlateNode.texts(editor)) {
+        const block = editor.children[path[0]];
+        const blockText = block ? normalizeSearchText(getNodeText(block)) : "";
+        const subject = normalizeSearchText(fact.subject);
+        const object = normalizeSearchText(fact.object ?? fact.value);
+
+        if (!blockText.includes(subject) || (object !== "" && !blockText.includes(object))) {
+          continue;
+        }
+
+        for (const match of node.text.matchAll(pattern)) {
+          if (match.index === undefined || match[0].length === 0) {
+            continue;
+          }
+
+          const anchor = { path, offset: match.index };
+          const focus = { path, offset: match.index + match[0].length };
+
+          const existingRange = ranges.find((range) =>
+            Path.equals(range.anchor.path, anchor.path) &&
+            range.anchor.offset === anchor.offset &&
+            range.focus.offset === focus.offset
+          );
+
+          if (existingRange) {
+            if (fact === conflictFact) {
+              existingRange.inconsistencyRole = "conflict";
+            }
+            continue;
+          }
+
+          ranges.push({
+            anchor,
+            focus,
+            inconsistent: true,
+            inconsistencyRole:
+              fact === conflictFact ? "conflict" : "context",
+          });
+        }
+      }
+    }
+  }
+
+  return ranges;
 }
 
 
@@ -498,6 +594,9 @@ function deserialize(
       );
 
       setInconsistentPaths(paths);
+      setInconsistentRanges(
+        getInconsistentTextRanges(editor, foundInconsistencies)
+      );
 
     } catch (error) {
       console.error(error);
@@ -565,6 +664,9 @@ function deserialize(
                */
               setInconsistentPaths(
                 getInconsistentPaths(editor, inconsistencies)
+              );
+              setInconsistentRanges(
+                getInconsistentTextRanges(editor, inconsistencies)
               );
             }}
         >
@@ -868,7 +970,13 @@ function renderLeaf({
   return (
     <span
       {...attributes}
-      className={leaf.inconsistent ? "inconsistent-text" : undefined}
+      className={
+        leaf.inconsistencyRole === "conflict"
+          ? "inconsistent-text"
+          : leaf.inconsistencyRole === "context"
+            ? "inconsistency-context"
+            : undefined
+      }
     >
       {children}
     </span>

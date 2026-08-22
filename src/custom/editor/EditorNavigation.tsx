@@ -90,7 +90,8 @@ export default function EditorNavigation({
       aria-label="Dokumentübersicht"
     >
       <div className="editor-navigation-header">
-        </div>
+      Document Overview
+      </div>
       <div className="editor-navigation-items">
         {items.map((item) => {
           const height = getSegmentHeight(

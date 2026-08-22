@@ -85,9 +85,22 @@
 .editor .inconsistent-text {
   display: inline-block;
   background-color: #fecaca;
+  border-radius: 4px;
+  padding-left: 4px;
+  padding-right: 4px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   animation: inconsistency-jitter 1s ease-in-out;
+}
+
+.editor .inconsistency-context {
+  display: inline-block;
+  background-color: #fef3c7;
+  border-radius: 4px;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 @keyframes inconsistency-jitter {

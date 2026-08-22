@@ -14,7 +14,7 @@ function App() {
     <Box sx={{flowGrow: 1}}>
       <Grid container spacing={2}>
         <Grid size={12} sx={{display: 'flex', justifyContent: 'center', alignItems:'center'}}>
-          <h1>Ripple Animation</h1>
+          <h1>Titel</h1>
         </Grid>
       </Grid>
       <Grid container spacing={2}>
