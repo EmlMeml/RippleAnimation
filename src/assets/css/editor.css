@@ -1,8 +1,21 @@
-.editor-container {
+.content-container{
   width: 80%;
+  display: flex;
+  flex-direction: row;
   max-height: 720px;
   min-height: 720px;
-  margin: 40px auto;
+}
+
+.editor-navigation-container{
+  padding-top: 24px;
+  left: 40px;
+}
+
+.editor-container {
+  width: 90%;
+  max-height: 720px;
+  min-height: 720px;
+  margin: 24px;
   border: 2px solid #b7c396;
   background-color: #fefefe;
   border-radius: 8px;
@@ -67,6 +80,55 @@
 
 .editor p {
   margin: 0 0 1em;
+}
+
+.editor .inconsistent-text {
+  display: inline-block;
+  background-color: #fecaca;
+  border-radius: 4px;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  animation: inconsistency-jitter 1s ease-in-out;
+}
+
+.editor .inconsistency-context {
+  display: inline-block;
+  background-color: #fef3c7;
+  border-radius: 4px;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@keyframes inconsistency-jitter {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-3px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor .inconsistent-text {
+    animation: none;
+  }
 }
 
 .editor-scroll-container{

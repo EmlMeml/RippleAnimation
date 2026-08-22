@@ -1,8 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   createEditor,
+  type BaseRange,
+  type DecoratedRange,
   type Descendant,
   Editor,
+  Node as SlateNode,
+  type NodeEntry,
+  Path,
   Text,
   Element as SlateElement,
   Transforms,
@@ -12,38 +17,28 @@ import {
   Editable,
   withReact,
   useSlate,
+  ReactEditor
 } from "slate-react";
 import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
 import { extractFacts } from "./../../analysis/extractesFacts";
-import type { Fact, FactExtraction } from "./../../types/facts";
+import type { FactExtraction } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
   type Inconsistency,
 } from './../../ai/consistencyChecker';
+import EditorNavigation from "./EditorNavigation";
 
 import type { StoryContext } from "../../types/story";
-
-type SlatePoint = {
-  path: number[];
-  offset: number;
-};
-
-type FactOccurrence = {
-  fact: Fact;
-  range: {
-    anchor: SlatePoint;
-    focus: SlatePoint;
-  };
-};
 
 type CustomText = {
   text: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  inconsistent?: boolean;
 };
 
 type LinkElement = {
@@ -62,7 +57,11 @@ type HeadingElement = {
   children: CustomText[];
 };
 
-type MarkFormat = Exclude<keyof CustomText, "text">;
+type MarkFormat = Exclude<keyof CustomText, "text" | "inconsistent">;
+type InconsistentTextRange = BaseRange & {
+  inconsistent: true;
+  inconsistencyRole: "conflict" | "context";
+};
 
 type CustomElement =
   | ParagraphElement
@@ -74,6 +73,10 @@ declare module "slate" {
     TextEditor: Editor;
     Element: CustomElement;
     Text: CustomText;
+    Range: BaseRange & {
+      inconsistent?: boolean;
+      inconsistencyRole?: "conflict" | "context";
+    };
   }
 }
 
@@ -92,24 +95,6 @@ function normalizeSearchText(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toLowerCase();
-}
-
-function getFactObjectText(fact: Fact): string {
-  if (
-    fact.object !== undefined &&
-    fact.object !== null
-  ) {
-    return String(fact.object);
-  }
-
-  if (
-    fact.value !== undefined &&
-    fact.value !== null
-  ) {
-    return String(fact.value);
-  }
-
-  return "";
 }
 
 
@@ -132,6 +117,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   }, []);
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
+  const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
+  const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
 
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -140,6 +127,22 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [, setAnalysisError] = useState("");
 
+  const [document, setDocument] = useState<Descendant[]>(initialValue);
+
+  const decorateInconsistencies = useCallback(
+    ([node, path]: NodeEntry): DecoratedRange[] => {
+      if (!Text.isText(node)) {
+        return [];
+      }
+
+      return inconsistentRanges.filter((range) =>
+        Path.equals(range.anchor.path, path)
+      );
+    },
+    [inconsistentRanges]
+  );
+
+  
   function replaceEditorContent(nodes: Descendant[]) {
     Editor.withoutNormalizing(editor, () => {
       editor.children = nodes;
@@ -149,7 +152,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         focus: { path: [0, 0], offset: 0 },
       };
     });
-
+    setDocument(nodes);
     editor.onChange();
   }  
 /* 
@@ -165,226 +168,215 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     return `${subject} ${object}`.trim();
   }
  */
-function findFactOccurrences(
+
+function getNodeText(node: Descendant): string {
+  if (Text.isText(node)) {
+    return node.text;
+  }
+
+  if (SlateElement.isElement(node)) {
+    return node.children
+      .map((child) => getNodeText(child))
+      .join("");
+  }
+
+  return "";
+}
+
+function getInconsistentPaths(
   editor: Editor,
-  facts: Fact[]
-): FactOccurrence[] {
-  const occurrences: FactOccurrence[] = [];
+  inconsistencies: Inconsistency[]
+): number[][] {
+  const paths: number[][] = [];
 
-  const textNodes = Array.from(
-    Editor.nodes(editor, {
-      at: [],
-      match: (node) => Text.isText(node),
-    })
-  );
+  for (const inconsistency of inconsistencies) {
+    const conflictingFact =
+      inconsistency.facts.find(
+        (fact) =>
+          normalizeSearchText(fact.subject) ===
+            normalizeSearchText(
+              inconsistency.subject
+            ) &&
+          normalizeSearchText(fact.predicate) ===
+            normalizeSearchText(
+              inconsistency.predicate
+            )
+      );
 
-  type TextOccurrence = {
-    path: number[];
-    start: number;
-    end: number;
-    text: string;
-  };
-
-  function findOccurrences(
-    searchText: string
-  ): TextOccurrence[] {
-    const normalizedSearch =
-      normalizeSearchText(searchText);
-
-    if (!normalizedSearch) {
-      return [];
+    if (!conflictingFact) {
+      continue;
     }
 
-    const result: TextOccurrence[] = [];
+    const subject = normalizeSearchText(
+      conflictingFact.subject
+    );
 
-    for (const [node, path] of textNodes) {
-      if (!Text.isText(node)) {
+    const object =
+      conflictingFact.object !== undefined
+        ? normalizeSearchText(
+            conflictingFact.object
+          )
+        : "";
+
+    /*
+     * Suche den Absatz, in dem die inkonsistente
+     * Aussage tatsächlich vorkommt.
+     */
+    for (
+      let index = 0;
+      index < editor.children.length;
+      index++
+    ) {
+      const node = editor.children[index];
+
+      if (!SlateElement.isElement(node)) {
         continue;
       }
 
-      const normalizedNodeText =
-        normalizeSearchText(node.text);
+      if (
+        node.type !== "paragraph" &&
+        node.type !== "heading-one"
+      ) {
+        continue;
+      }
 
-      let searchStart = 0;
+      const text = normalizeSearchText(
+        getNodeText(node)
+      );
 
-      while (true) {
-        const index =
-          normalizedNodeText.indexOf(
-            normalizedSearch,
-            searchStart
-          );
+      const hasSubject =
+        subject !== "" &&
+        text.includes(subject);
 
-        if (index === -1) {
-          break;
+      const hasObject =
+        object !== "" &&
+        text.includes(object);
+
+      /*
+       * Bei einer Relation müssen beide
+       * Entitäten im selben Absatz vorkommen.
+       */
+      if (
+        hasSubject &&
+        hasObject
+      ) {
+        const path = [index];
+
+        if (
+          !paths.some(
+            (existingPath) =>
+              existingPath.join(".") ===
+              path.join(".")
+          )
+        ) {
+          paths.push(path);
         }
 
-        result.push({
-          path,
-          start: index,
-          end:
-            index + normalizedSearch.length,
-          text: node.text,
-        });
-
-        searchStart =
-          index + normalizedSearch.length;
+        break;
       }
     }
-
-    return result;
   }
 
-  const usedOccurrences = new Set<string>();
+  return paths;
+}
 
-  function getOccurrenceKey(
-    occurrence: TextOccurrence
-  ): string {
-    return [
-      occurrence.path.join("."),
-      occurrence.start,
-      occurrence.end,
-    ].join(":");
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getFactHighlightPattern(
+  fact: Inconsistency["facts"][number]
+): RegExp | null {
+  const relationPatterns: Partial<Record<
+    Inconsistency["facts"][number]["predicate"],
+    string
+  >> = {
+    younger_than: "younger|jünger",
+    older_than: "older|älter",
+    sibling_of: "brother|sister|sibling|bruder|schwester|geschwister",
+    parent_of: "parent|mother|father|elternteil|mutter|vater",
+    child_of: "child|son|daughter|kind|sohn|tochter",
+    married_to: "married|husband|wife|verheiratet|ehemann|ehefrau",
+    friend_of: "friend|freund(?:in)?",
+    owns: "owns|owner|besitzt|gehört",
+    has: "has|hat",
+  };
+
+  const relationPattern = relationPatterns[fact.predicate];
+  if (relationPattern) {
+    return new RegExp(`\\b(?:${relationPattern})\\b`, "gi");
   }
 
-  function compareOccurrences(
-    first: TextOccurrence,
-    second: TextOccurrence
-  ): number {
-    const firstPath = first.path.join(".");
-    const secondPath = second.path.join(".");
-
-    if (firstPath !== secondPath) {
-      return firstPath.localeCompare(
-        secondPath,
-        undefined,
-        { numeric: true }
-      );
-    }
-
-    return first.start - second.start;
+  const value = fact.object ?? fact.value;
+  if (value === undefined || value === null || value === "") {
+    return null;
   }
 
-  for (const fact of facts) {
-    const subjectOccurrences =
-      findOccurrences(fact.subject);
+  return new RegExp(`\\b${escapeForRegExp(String(value))}\\b`, "gi");
+}
 
-    const objectText =
-      getFactObjectText(fact);
+function getInconsistentTextRanges(
+  editor: Editor,
+  inconsistencies: Inconsistency[]
+): InconsistentTextRange[] {
+  const ranges: InconsistentTextRange[] = [];
 
-    const objectOccurrences =
-      objectText
-        ? findOccurrences(objectText)
-        : [];
+  for (const inconsistency of inconsistencies) {
+    const conflictFact = [...inconsistency.facts].sort(
+      (first, second) =>
+        (first.source?.start ?? 0) - (second.source?.start ?? 0)
+    ).at(-1);
 
-    /*
-     * Wir bevorzugen das erste noch nicht
-     * verwendete Subject.
-     */
-    const subjectOccurrence =
-      subjectOccurrences
-        .sort(compareOccurrences)
-        .find(
-          (occurrence) =>
-            !usedOccurrences.has(
-              getOccurrenceKey(occurrence)
-            )
-        );
+    for (const fact of inconsistency.facts) {
+      const pattern = getFactHighlightPattern(fact);
+      if (!pattern) {
+        continue;
+      }
 
-    if (!subjectOccurrence) {
-      continue;
-    }
+      for (const [node, path] of SlateNode.texts(editor)) {
+        const block = editor.children[path[0]];
+        const blockText = block ? normalizeSearchText(getNodeText(block)) : "";
+        const subject = normalizeSearchText(fact.subject);
+        const object = normalizeSearchText(fact.object ?? fact.value);
 
-    /*
-     * Das Object muss nach dem Subject liegen.
-     * Dadurch verhindern wir, dass bei wiederholten
-     * Namen versehentlich ein früheres Vorkommen
-     * verwendet wird.
-     */
-    const objectOccurrence =
-      objectOccurrences
-        .sort(compareOccurrences)
-        .find((occurrence) => {
-          if (
-            usedOccurrences.has(
-              getOccurrenceKey(occurrence)
-            )
-          ) {
-            return false;
+        if (!blockText.includes(subject) || (object !== "" && !blockText.includes(object))) {
+          continue;
+        }
+
+        for (const match of node.text.matchAll(pattern)) {
+          if (match.index === undefined || match[0].length === 0) {
+            continue;
           }
 
-          const samePath =
-            occurrence.path.join(".") ===
-            subjectOccurrence.path.join(".");
+          const anchor = { path, offset: match.index };
+          const focus = { path, offset: match.index + match[0].length };
 
-          if (samePath) {
-            return (
-              occurrence.start >=
-              subjectOccurrence.end
-            );
-          }
-
-          return (
-            compareOccurrences(
-              occurrence,
-              subjectOccurrence
-            ) > 0
+          const existingRange = ranges.find((range) =>
+            Path.equals(range.anchor.path, anchor.path) &&
+            range.anchor.offset === anchor.offset &&
+            range.focus.offset === focus.offset
           );
-        });
 
-    /*
-     * Falls kein Object vorhanden ist oder es nicht
-     * gefunden wurde, markieren wir zumindest
-     * das Subject.
-     */
-    if (!objectOccurrence) {
-      const subjectKey =
-        getOccurrenceKey(
-          subjectOccurrence
-        );
+          if (existingRange) {
+            if (fact === conflictFact) {
+              existingRange.inconsistencyRole = "conflict";
+            }
+            continue;
+          }
 
-      usedOccurrences.add(subjectKey);
-
-      occurrences.push({
-        fact,
-        range: {
-          anchor: {
-            path: subjectOccurrence.path,
-            offset: subjectOccurrence.start,
-          },
-          focus: {
-            path: subjectOccurrence.path,
-            offset: subjectOccurrence.end,
-          },
-        },
-      });
-
-      continue;
+          ranges.push({
+            anchor,
+            focus,
+            inconsistent: true,
+            inconsistencyRole:
+              fact === conflictFact ? "conflict" : "context",
+          });
+        }
+      }
     }
-
-    usedOccurrences.add(
-      getOccurrenceKey(subjectOccurrence)
-    );
-
-    usedOccurrences.add(
-      getOccurrenceKey(objectOccurrence)
-    );
-
-    occurrences.push({
-      fact,
-      range: {
-        anchor: {
-          path: subjectOccurrence.path,
-          offset: subjectOccurrence.start,
-        },
-        focus: {
-          path: objectOccurrence.path,
-          offset: objectOccurrence.end,
-        },
-      },
-    });
   }
 
-  return occurrences;
+  return ranges;
 }
 
 
@@ -581,46 +573,30 @@ function deserialize(
 
     try {
       const text = getEditorText(editor.children);
-
+      console.log('editor-text: ',text);
       if (!text.trim()) {
         setAnalysisError("Der Editor ist leer.");
         return;
       }
+     
       const result = await extractFacts(text,context);
 
-      console.log("=== EXTRACTED FACTS ===");
-      console.log(JSON.stringify(result, null, 2));
-
-      console.log(
-        "AGE FACTS:",
-        result.facts.filter(
-          f =>
-            f.predicate === "younger_than" ||
-            f.predicate === "older_than"
-        )
-      );
-
       setAnalysis(result);
-
-      const occurrences = findFactOccurrences(
-        editor,
-        result.facts
-      );
-
-      console.log(
-        "FACT OCCURRENCES:",
-        occurrences
-      );
 
       const foundInconsistencies =
         checkConsistency(result);
 
-      console.log(
-        "INCONSISTENCIES:",
-        JSON.stringify(foundInconsistencies, null, 2)
+      setInconsistencies(foundInconsistencies);
+
+      const paths = getInconsistentPaths(
+        editor,
+        foundInconsistencies
       );
 
-      setInconsistencies(foundInconsistencies);
+      setInconsistentPaths(paths);
+      setInconsistentRanges(
+        getInconsistentTextRanges(editor, foundInconsistencies)
+      );
 
     } catch (error) {
       console.error(error);
@@ -636,14 +612,63 @@ function deserialize(
   }
 
   return (
+    <div className="content-container">
+      <div className="editor-navigation-container">
+        <EditorNavigation
+        document={document}
+        inconsistentPaths={inconsistentPaths}
+        onNavigate={(path) => {
+          try {
+            const point = Editor.start(editor, path);
+
+            Transforms.select(editor, {
+              anchor: point,
+              focus: point,
+            });
+
+            ReactEditor.focus(editor);
+
+            const element = ReactEditor.toDOMNode(
+              editor,
+              Editor.node(editor, path)[0]
+            );
+
+            element.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          } catch (error) {
+            console.error(
+              "Navigation zum Absatz fehlgeschlagen:",
+              error
+            );
+          }
+        }}
+      />
+        
+    </div>
     <div className="editor-container">
         <Slate
             editor={editor}
             initialValue={initialValue}
-            /* onChange={(newValue) => {
-                setValue(newValue);
-                }  
-            } */
+            onValueChange={(value) => {
+              /*
+               * Slate mutiert `editor.children` direkt. Die Navigation braucht
+               * deshalb bei jeder Inhaltsänderung einen neuen React-Snapshot.
+               */
+              setDocument([...value]);
+
+              /*
+               * Pfade sind positionsbasiert. Nach dem Löschen oder Verschieben
+               * eines Absatzes dürfen alte Pfade nicht weiterverwendet werden.
+               */
+              setInconsistentPaths(
+                getInconsistentPaths(editor, inconsistencies)
+              );
+              setInconsistentRanges(
+                getInconsistentTextRanges(editor, inconsistencies)
+              );
+            }}
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
         <div className="editor-scroll-container" style={{minHeight:"200px"}}>
@@ -652,13 +677,8 @@ function deserialize(
             placeholder="Text eingeben ..."
             renderElement={renderElement}
             renderLeaf={renderLeaf}
+            decorate={decorateInconsistencies}
             spellCheck
-            onChange={() => {
-              console.log(
-                "SLATE ONCHANGE:",
-                getEditorText(editor.children)
-              );
-            }}
             />  
         </div>
         
@@ -714,7 +734,7 @@ function deserialize(
         </div>
       )}
     </div>
-      
+  </div>   
   );
 }
 
@@ -948,7 +968,16 @@ function renderLeaf({
   }
 
   return (
-    <span {...attributes}>
+    <span
+      {...attributes}
+      className={
+        leaf.inconsistencyRole === "conflict"
+          ? "inconsistent-text"
+          : leaf.inconsistencyRole === "context"
+            ? "inconsistency-context"
+            : undefined
+      }
+    >
       {children}
     </span>
   );

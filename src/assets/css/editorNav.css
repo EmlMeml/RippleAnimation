@@ -1,0 +1,78 @@
+.editor-navigation {
+  width: 88px;
+  height: 100%;
+}
+
+.editor-navigation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: 93%;
+  background-color: rgb(255, 255, 255);
+  padding: 8px;
+  border: 2px #b7c396 solid;
+  border-radius: 0px 0px 8px 8px;
+}
+
+.editor-navigation-header{
+  background-color: #b7c396;
+  padding:8px;
+  min-height: 40px;
+  border-radius: 8px 8px 0px 0px;
+  font-size: 14px;
+  font-weight: bold;
+  color: white;
+}
+
+.editor-navigation-segment {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: #d0d0d0;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.editor-navigation-segment:hover {
+  opacity: 0.75;
+}
+
+.editor-navigation-segment.has-inconsistency {
+  background: #e57373;
+}
+
+.editor-navigation-segment.has-inconsistency::before,
+.editor-navigation-segment.has-inconsistency::after {
+  position: absolute;
+  inset: -1px;
+  border: 2px solid #e57373;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  animation: inconsistency-ripple 2.2s ease-out infinite;
+}
+
+.editor-navigation-segment.has-inconsistency::after {
+  animation-delay: -1.1s;
+}
+
+@keyframes inconsistency-ripple {
+  from {
+    opacity: 0.65;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.75, 1.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-navigation-segment.has-inconsistency::before,
+  .editor-navigation-segment.has-inconsistency::after {
+    animation: none;
+  }
+}
