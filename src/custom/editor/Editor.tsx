@@ -119,6 +119,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
   const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
+  const [isConflictHovered, setIsConflictHovered] = useState(false);
 
   const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -647,7 +648,10 @@ function deserialize(
       />
         
     </div>
-    <div className="editor-container">
+    <div className={[
+      "editor-container",
+      isConflictHovered ? "show-inconsistency-context" : "",
+    ].filter(Boolean).join(" ")}> 
         <Slate
             editor={editor}
             initialValue={initialValue}
@@ -676,7 +680,10 @@ function deserialize(
             className="editor"
             placeholder="Text eingeben ..."
             renderElement={renderElement}
-            renderLeaf={renderLeaf}
+            renderLeaf={(props) => renderLeaf({
+              ...props,
+              onConflictHoverChange: setIsConflictHovered,
+            })}
             decorate={decorateInconsistencies}
             spellCheck
             />  
@@ -954,6 +961,7 @@ function renderLeaf({
   attributes,
   children,
   leaf,
+  onConflictHoverChange,
 }: any) {
   if (leaf.bold) {
     children = <strong>{children}</strong>;
@@ -975,7 +983,17 @@ function renderLeaf({
           ? "inconsistent-text"
           : leaf.inconsistencyRole === "context"
             ? "inconsistency-context"
-            : undefined
+          : undefined
+      }
+      onMouseEnter={
+        leaf.inconsistencyRole === "conflict"
+          ? () => onConflictHoverChange(true)
+          : undefined
+      }
+      onMouseLeave={
+        leaf.inconsistencyRole === "conflict"
+          ? () => onConflictHoverChange(false)
+          : undefined
       }
     >
       {children}

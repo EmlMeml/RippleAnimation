@@ -90,22 +90,38 @@
   padding-right: 4px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  animation: inconsistency-jitter 1s ease-in-out;
+  opacity: 0;
+  animation: inconsistency-jitter 1s ease-in-out 400ms both;
 }
 
 .editor .inconsistency-context {
   display: inline-block;
-  background-color: #fef3c7;
+  background-color: transparent;
   border-radius: 4px;
-  padding-left: 4px;
-  padding-right: 4px;
+  padding-left: 0;
+  padding-right: 0;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  transition:
+    background-color 200ms ease,
+    padding 200ms ease;
+}
+
+.editor-container.show-inconsistency-context .inconsistency-context {
+  background-color: #fef3c7;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 @keyframes inconsistency-jitter {
-  0%,
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+
+  15%,
   100% {
+    opacity: 1;
     transform: translateX(0);
   }
 
@@ -126,8 +142,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .editor .inconsistent-text {
+  .editor .inconsistent-text,
+  .editor .inconsistency-context {
+    opacity: 1;
     animation: none;
+    transition: none;
   }
 }
 
