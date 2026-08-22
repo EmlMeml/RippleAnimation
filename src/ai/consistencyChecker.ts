@@ -6,12 +6,38 @@ import type {
 import { temporalRangesOverlap } from "./temporalOverlap";
 
 
+export type InconsistencySeverity =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+/** Der Bereich der Geschichte, den die Inkonsistenz betrifft. */
+export type InconsistencyImpact =
+  | "local"
+  | "character"
+  | "relationship"
+  | "world";
+
 export interface Inconsistency {
   type: "conflicting_fact";
   subject: string;
   predicate: string;
   facts: FactExtraction["facts"];
   message: string;
+  /** Wie schwer der logische Widerspruch ist. */
+  severity?: InconsistencySeverity;
+  /** Welcher Erzählbereich von dem Widerspruch betroffen ist. */
+  impact?: InconsistencyImpact;
+  /** Lesbare Erklärung der möglichen Auswirkung auf die Geschichte. */
+  impactDescription?: string;
+}
+
+/** Eine vom Consistency-Checker vollständig bewertete Inkonsistenz. */
+export interface AssessedInconsistency extends Inconsistency {
+  severity: InconsistencySeverity;
+  impact: InconsistencyImpact;
+  impactDescription: string;
 }
 
 /*
@@ -224,6 +250,82 @@ function getInconsistencyKey(
     normalizeValue(inconsistency.predicate),
     ...factKeys,
   ].join("|");
+}
+
+/**
+ * Ordnet einer Inkonsistenz eine konsistente, erklärbare Bewertung zu.
+ * Die Bewertung ist bewusst heuristisch: Sie bewertet die potenzielle
+ * Auswirkung auf die Erzählung, nicht die Wichtigkeit einer Figur.
+ */
+function assessInconsistency(
+  inconsistency: Omit<
+    Inconsistency,
+    "severity" | "impact" | "impactDescription"
+  >
+): AssessedInconsistency {
+  const predicate = inconsistency.predicate as Predicate;
+
+  if (
+    predicate === "age" ||
+    predicate === "gender" ||
+    predicate === "born_in"
+  ) {
+    return {
+      ...inconsistency,
+      severity: "critical",
+      impact: "character",
+      impactDescription:
+        "Die Grunddaten der Figur widersprechen sich. Das kann ihre Identität und alle darauf aufbauenden Szenen unklar machen.",
+    };
+  }
+
+  if (
+    predicate === "parent_of" ||
+    predicate === "child_of" ||
+    predicate === "married_to" ||
+    predicate === "younger_than" ||
+    predicate === "older_than"
+  ) {
+    return {
+      ...inconsistency,
+      severity: "high",
+      impact: "relationship",
+      impactDescription:
+        "Eine zentrale Beziehung zwischen Figuren ist widersprüchlich. Motivationen, Konflikte oder Familienverhältnisse können dadurch unverständlich werden.",
+    };
+  }
+
+  if (predicate === "located_in") {
+    return {
+      ...inconsistency,
+      severity: "medium",
+      impact: "world",
+      impactDescription:
+        "Der räumliche Kontext der Geschichte ist widersprüchlich. Ortswechsel und die Logik der Welt sollten überprüft werden.",
+    };
+  }
+
+  if (
+    predicate === "lives_in" ||
+    predicate === "works_at" ||
+    predicate === "occupation"
+  ) {
+    return {
+      ...inconsistency,
+      severity: "high",
+      impact: "character",
+      impactDescription:
+        "Der aktuelle Lebensumstand einer Figur ist widersprüchlich. Das kann Szenen, Handlungen und die Nachvollziehbarkeit der Figur beeinträchtigen.",
+    };
+  }
+
+  return {
+    ...inconsistency,
+    severity: "low",
+    impact: "local",
+    impactDescription:
+      "Die Inkonsistenz betrifft ein lokales Detail. Sie ist für die Kontinuität relevant, verändert die Handlung aber voraussichtlich nicht unmittelbar.",
+  };
 }
 
 function getOutgoingFacts(
@@ -1481,7 +1583,7 @@ function checkTransitivePredicates(
 
 export function checkConsistency(
   extraction: FactExtraction
-): Inconsistency[] {
+): AssessedInconsistency[] {
   const inconsistencies: Inconsistency[] = [];
 
   inconsistencies.push(
@@ -1527,5 +1629,7 @@ export function checkConsistency(
     }
   }
 
-  return Array.from(unique.values());
+  return Array.from(unique.values()).map(
+    assessInconsistency
+  );
 }

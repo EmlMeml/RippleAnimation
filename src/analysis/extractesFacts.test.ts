@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractFacts } from "./extractesFacts";
 import { askAI } from "./../ai/api";
+import type { FactExtraction } from "../types/facts";
 
 vi.mock("./../ai/api", () => ({
   askAI: vi.fn(),
@@ -10,6 +11,25 @@ describe("extractFacts", () => {
   const context = {
     referenceDate: "2026-08-14",
   };
+
+  it("wiederholt nur einen fehlgeschlagenen Chunk", async () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [],
+    };
+    const text = Array.from(
+      { length: 1501 },
+      (_, index) => `wort${index}`
+    ).join(" ");
+
+    vi.mocked(askAI)
+      .mockRejectedValueOnce(new Error("empty response"))
+      .mockResolvedValue(extraction);
+
+    await expect(extractFacts(text, context)).resolves.toEqual(extraction);
+    expect(askAI).toHaveBeenCalledTimes(3);
+  });
+
   it("übernimmt zeitlichen Kontext aus der AI-Antwort", async () => {
     vi.mocked(askAI).mockResolvedValue({
       entities: [

@@ -1,5 +1,5 @@
 .content-container{
-  width: 80%;
+  width: min(95%, 1400px);
   display: flex;
   flex-direction: row;
   max-height: 720px;
@@ -12,7 +12,8 @@
 }
 
 .editor-container {
-  width: 90%;
+  flex: 1;
+  width: auto;
   max-height: 720px;
   min-height: 720px;
   margin: 24px;
@@ -84,7 +85,6 @@
 
 .editor .inconsistent-text {
   display: inline-block;
-  background-color: #fecaca;
   border-radius: 4px;
   padding-left: 4px;
   padding-right: 4px;
@@ -92,6 +92,24 @@
   -webkit-box-decoration-break: clone;
   opacity: 0;
   animation: inconsistency-jitter 1s ease-in-out 400ms both;
+}
+
+/* Je schwerer der Konflikt, desto kräftiger die rote Markierung. */
+.editor .inconsistent-text--low {
+  background-color: #fee2e2;
+}
+
+.editor .inconsistent-text--medium {
+  background-color: #fecaca;
+}
+
+.editor .inconsistent-text--high {
+  background-color: #fca5a5;
+}
+
+.editor .inconsistent-text--critical {
+  background-color: #dc2626;
+  color: #fff;
 }
 
 .editor .inconsistency-context {
@@ -107,7 +125,7 @@
     padding 200ms ease;
 }
 
-.editor-container.show-inconsistency-context .inconsistency-context {
+.editor .inconsistency-context--active {
   background-color: #fef3c7;
   padding-left: 4px;
   padding-right: 4px;
@@ -150,6 +168,21 @@
   }
 }
 
+/* Zwei Namen erzwingen auch bei wiederholtem Klick einen Animations-Neustart. */
+@keyframes inconsistency-jitter-replay-a {
+  0% { opacity: 0; transform: translateX(0); }
+  15%, 100% { opacity: 1; transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+@keyframes inconsistency-jitter-replay-b {
+  0% { opacity: 0; transform: translateX(0); }
+  15%, 100% { opacity: 1; transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
 .editor-scroll-container{
   flex: 1;
   min-height: 0;
@@ -159,4 +192,62 @@
 .analysis-panel{
   border: 1px solid #b7c396;
   border-radius: 8px;
+}
+
+.conflict-list {
+  width: 270px;
+  min-height: 300px;
+  max-height: 672px;
+  margin: 24px 0;
+  padding: 16px;
+  border: 2px solid #b7c396;
+  border-radius: 8px;
+  background: #fff;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.conflict-list h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.conflict-list-empty {
+  color: #5f6660;
+}
+
+.conflict-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #3f1010;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conflict-card:hover,
+.conflict-card:focus-visible {
+  outline: 2px solid #48512e;
+  outline-offset: 2px;
+}
+
+.conflict-card--low { background: #fee2e2; border-color: #fecaca; }
+.conflict-card--medium { background: #fecaca; border-color: #fca5a5; }
+.conflict-card--high { background: #fca5a5; border-color: #f87171; }
+.conflict-card--critical { background: #dc2626; border-color: #b91c1c; color: #fff; }
+
+.conflict-card-severity {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.conflict-card-message {
+  line-height: 1.35;
 }
