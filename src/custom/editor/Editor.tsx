@@ -552,10 +552,21 @@ function deserialize(
         <Slate
             editor={editor}
             initialValue={initialValue}
-            /* onChange={(newValue) => {
-                setValue(newValue);
-                }  
-            } */
+            onValueChange={(value) => {
+              /*
+               * Slate mutiert `editor.children` direkt. Die Navigation braucht
+               * deshalb bei jeder Inhaltsänderung einen neuen React-Snapshot.
+               */
+              setDocument([...value]);
+
+              /*
+               * Pfade sind positionsbasiert. Nach dem Löschen oder Verschieben
+               * eines Absatzes dürfen alte Pfade nicht weiterverwendet werden.
+               */
+              setInconsistentPaths(
+                getInconsistentPaths(editor, inconsistencies)
+              );
+            }}
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
         <div className="editor-scroll-container" style={{minHeight:"200px"}}>
@@ -566,14 +577,6 @@ function deserialize(
             renderLeaf={renderLeaf}
             decorate={decorateInconsistencies}
             spellCheck
-            onChange={() => {
-              setDocument([...editor.children]);
-
-              console.log(
-                "SLATE ONCHANGE:",
-                getEditorText(editor.children)
-              );
-            }}
             />  
         </div>
         
