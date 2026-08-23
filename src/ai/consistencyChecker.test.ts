@@ -2956,7 +2956,7 @@ it("currently treats a shared ancestor as compatible even when temporal ranges d
         extraction.facts[3],
       ],
       message:
-        'anna has conflicting information for "located_in".',
+        "Anna is placed in both Munich and Berlin.",
       severity: "medium",
       impact: "world",
       impactDescription:

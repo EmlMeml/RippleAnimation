@@ -10,12 +10,12 @@
   height: 93%;
   background-color: rgb(255, 255, 255);
   padding: 8px;
-  border: 2px #b7c396 solid;
+  border: 2px #97a0c3 solid;
   border-radius: 0px 0px 8px 8px;
 }
 
 .editor-navigation-header{
-  background-color: #b7c396;
+  background-color: #97a0c3;
   padding:8px;
   min-height: 40px;
   border-radius: 8px 8px 0px 0px;
@@ -24,15 +24,94 @@
   color: white;
 }
 
+.editor-navigation-segment-wrapper {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+}
+
 .editor-navigation-segment {
   position: relative;
   width: 100%;
+  height: 100%;
   padding: 0;
   border: none;
   border-radius: 3px;
   background: #d0d0d0;
   cursor: pointer;
   overflow: visible;
+}
+
+.editor-navigation-conflicts {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  transform: translateY(-50%);
+}
+
+.editor-navigation-conflict-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: #fecaca;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.editor-navigation-conflict-dot--low {
+  width: 7px;
+  height: 7px;
+  border-color: #fecaca;
+  background: #fee2e2;
+}
+
+.editor-navigation-conflict-dot--medium {
+  width: 8px;
+  height: 8px;
+  border-color: #fca5a5;
+  background: #fecaca;
+}
+
+.editor-navigation-conflict-dot--high {
+  width: 9px;
+  height: 9px;
+  border-color: #f87171;
+  background: #fca5a5;
+}
+
+.editor-navigation-conflict-dot--critical {
+  width: 10px;
+  height: 10px;
+  border-color: #b91c1c;
+  background: #dc2626;
+}
+
+.editor-navigation-conflict-dot:hover,
+.editor-navigation-conflict-dot:focus-visible,
+.editor-navigation-conflict-more:hover,
+.editor-navigation-conflict-more:focus-visible {
+  outline: 2px solid #3f496f;
+  outline-offset: 1px;
+}
+
+.editor-navigation-conflict-more {
+  min-width: 20px;
+  padding: 1px 3px;
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  background: #fff;
+  color: #7f1d1d;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 .editor-navigation-segment:hover {

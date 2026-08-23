@@ -262,6 +262,81 @@ function getInconsistencyKey(
   ].join("|");
 }
 
+function displayValue(value: unknown): string {
+  const text = String(value ?? "").replaceAll("_", " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "an unknown value";
+}
+
+function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
+}
+
+function formatUserFacingMessage(inconsistency: Inconsistency): string {
+  const subject = displayValue(inconsistency.subject);
+  const values = Array.from(new Set(
+    inconsistency.facts
+      .map((fact) => fact.object ?? fact.value)
+      .filter((value) => value !== undefined && value !== null)
+      .map(displayValue)
+  ));
+  const [firstValue, secondValue] = values;
+
+  if (inconsistency.category === "self_relation") {
+    const relationship: Partial<Record<Predicate, string>> = {
+      sibling_of: "sibling",
+      friend_of: "friend",
+      married_to: "spouse",
+      parent_of: "parent",
+      child_of: "child",
+    };
+
+    return `${subject} is incorrectly described as their own ${relationship[inconsistency.predicate as Predicate] ?? "relation"}.`;
+  }
+
+  if (inconsistency.category === "opposing_relation") {
+    return `${subject} is described as both younger and older than ${firstValue}.`;
+  }
+
+  if (inconsistency.category === "transitive_cycle") {
+    return `${possessive(subject)} ${displayValue(inconsistency.predicate)} relationships form an impossible cycle.`;
+  }
+
+  if (inconsistency.category === "indirect_age_conflict") {
+    return `${possessive(subject)} age relationships create an indirect contradiction.`;
+  }
+
+  if (inconsistency.category === "age_value_conflict") {
+    return `${possessive(subject)} stated age conflicts with the described age relationship.`;
+  }
+
+  if (inconsistency.category === "inverse_relation") {
+    return `${subject} is assigned mutually incompatible relationships involving ${firstValue}.`;
+  }
+
+  if (firstValue && secondValue) {
+    switch (inconsistency.predicate) {
+      case "age":
+        return `${possessive(subject)} age changes from ${firstValue} to ${secondValue}.`;
+      case "occupation":
+        return `${possessive(subject)} occupation changes from ${firstValue} to ${secondValue}.`;
+      case "works_at":
+        return `${subject} is associated with both ${firstValue} and ${secondValue} as workplaces during the same period.`;
+      case "lives_in":
+        return `${subject} is said to live in both ${firstValue} and ${secondValue} at the same time.`;
+      case "born_in":
+        return `${possessive(subject)} birthplace changes from ${firstValue} to ${secondValue}.`;
+      case "located_in":
+        return `${subject} is placed in both ${firstValue} and ${secondValue}.`;
+      case "gender":
+        return `${possessive(subject)} gender is described as both ${firstValue} and ${secondValue}.`;
+      default:
+        return `${subject} has conflicting ${displayValue(inconsistency.predicate)} information: ${firstValue} and ${secondValue}.`;
+    }
+  }
+
+  return inconsistency.message;
+}
+
 /**
  * Ordnet einer Inkonsistenz eine konsistente, erklärbare Bewertung zu.
  * Die Bewertung ist bewusst heuristisch: Sie bewertet die potenzielle
@@ -1644,7 +1719,10 @@ export function checkConsistency(
     }
   }
 
-  return Array.from(unique.values()).map(
-    assessInconsistency
+  return Array.from(unique.values()).map((inconsistency) =>
+    assessInconsistency({
+      ...inconsistency,
+      message: formatUserFacingMessage(inconsistency),
+    })
   );
 }

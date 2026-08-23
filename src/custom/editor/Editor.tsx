@@ -23,8 +23,7 @@ import { withHistory } from "slate-history";
 import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
 import { extractFacts } from "./../../analysis/extractesFacts";
-import type { FactExtraction } from "./../../types/facts";
-import type { Predicate } from "./../../types/facts";
+import type { Fact, FactExtraction, Predicate } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
@@ -133,6 +132,35 @@ function getFactThemePresentation(predicate: string) {
     emoji: "⚠️",
     label: "General fact",
   };
+}
+
+function displayFactValue(value: unknown): string {
+  const text = String(value ?? "").replaceAll("_", " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Unknown";
+}
+
+function formatFactStatement(fact: Fact): string {
+  const subject = displayFactValue(fact.subject);
+  const value = displayFactValue(fact.object ?? fact.value);
+
+  switch (fact.predicate) {
+    case "age": return `${subject} is ${value} years old.`;
+    case "occupation": return `${subject} is described as ${value}.`;
+    case "works_at": return `${subject} works at ${value}.`;
+    case "lives_in": return `${subject} lives in ${value}.`;
+    case "born_in": return `${subject} was born in ${value}.`;
+    case "located_in": return `${subject} is located in ${value}.`;
+    case "younger_than": return `${subject} is younger than ${value}.`;
+    case "older_than": return `${subject} is older than ${value}.`;
+    case "sibling_of": return `${subject} is a sibling of ${value}.`;
+    case "parent_of": return `${subject} is a parent of ${value}.`;
+    case "child_of": return `${subject} is a child of ${value}.`;
+    case "married_to": return `${subject} is married to ${value}.`;
+    case "friend_of": return `${subject} is a friend of ${value}.`;
+    case "owns": return `${subject} owns ${value}.`;
+    case "has": return `${subject} has ${value}.`;
+    default: return `${subject}: ${displayFactValue(fact.predicate)} — ${value}.`;
+  }
 }
 
 type CustomElement =
@@ -780,7 +808,7 @@ function getInconsistentPaths(
 ): InconsistentPath[] {
   const paths = new Map<string, InconsistentPath>();
 
-  for (const inconsistency of inconsistencies) {
+  for (const [index, inconsistency] of inconsistencies.entries()) {
     const conflictingFact = getConflictingFact(inconsistency);
 
     if (!conflictingFact) {
@@ -794,9 +822,24 @@ function getInconsistentPaths(
       const key = path.join(".");
       const severity = inconsistency.severity ?? "medium";
       const existing = paths.get(key);
+      const pathInconsistency = {
+        index,
+        severity,
+        predicate: inconsistency.predicate,
+      };
 
-      if (!existing || isMoreSevere(severity, existing.severity)) {
-        paths.set(key, { path, severity });
+      if (!existing) {
+        paths.set(key, {
+          path,
+          severity,
+          inconsistencies: [pathInconsistency],
+        });
+      } else {
+        existing.inconsistencies.push(pathInconsistency);
+
+        if (isMoreSevere(severity, existing.severity)) {
+          existing.severity = severity;
+        }
       }
     }
   }
@@ -1261,6 +1304,7 @@ function deserialize(
             );
           }
         }}
+        onNavigateInconsistency={focusInconsistency}
       />
         
     </div>
@@ -1431,6 +1475,23 @@ function deserialize(
               <span className="conflict-card-message">
                 {inconsistency.message}
               </span>
+              <span className="conflict-card-facts">
+                {inconsistency.facts.map((fact, factIndex) => {
+                  const label = inconsistency.facts.length === 1
+                    ? "Statement"
+                    : factIndex === 0
+                      ? "Earlier"
+                      : factIndex === inconsistency.facts.length - 1
+                        ? "Later"
+                        : "Related";
+
+                  return (
+                    <span key={`${fact.predicate}-${factIndex}`} className="conflict-card-fact">
+                      <strong>{label}:</strong> {formatFactStatement(fact)}
+                    </span>
+                  );
+                })}
+              </span>
             </button>
           );
         })
@@ -1512,7 +1573,7 @@ function Toolbar({
       </button>
       <button
       type="button"
-      style={{color:'#2b311c'}}
+      style={{color:'#252b45'}}
       onMouseDown={(event) => {
         event.preventDefault();
         onAnalyze();
