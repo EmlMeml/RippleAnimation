@@ -129,6 +129,14 @@
   background-color: #fef3c7;
   padding-left: 4px;
   padding-right: 4px;
+  outline: 1px dashed #ef4444;
+  animation: inconsistency-scope-target 800ms ease-out both;
+}
+
+@keyframes inconsistency-scope-target {
+  0% { box-shadow: 0 0 0 0 rgb(220 38 38 / 55%); }
+  70% { box-shadow: 0 0 0 8px rgb(220 38 38 / 0%); }
+  100% { box-shadow: 0 0 0 0 rgb(220 38 38 / 0%); }
 }
 
 @keyframes inconsistency-jitter {
@@ -194,6 +202,37 @@
   overflow-y: auto;
 }
 
+.inconsistency-scope-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.inconsistency-scope-path {
+  fill: none;
+  stroke: #dc2626;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 3px rgb(220 38 38 / 45%));
+  animation:
+    inconsistency-scope-draw 700ms ease-out forwards,
+    inconsistency-scope-pulse 1.4s ease-in-out 700ms infinite;
+}
+
+@keyframes inconsistency-scope-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes inconsistency-scope-pulse {
+  0%, 100% { opacity: 0.55; stroke-width: 2; }
+  50% { opacity: 1; stroke-width: 3; }
+}
+
 .offscreen-inconsistency-markers {
   position: absolute;
   right: 0;
@@ -213,14 +252,18 @@
 
 .offscreen-inconsistency-marker {
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   transform: translateX(-50%);
   border: 1px solid transparent;
   border-radius: 50%;
   cursor: pointer;
   pointer-events: auto;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  line-height: 1;
   box-shadow: 0 2px 7px rgb(63 16 16 / 25%);
 }
 
@@ -255,9 +298,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .offscreen-inconsistency-marker::before,
-  .offscreen-inconsistency-marker::after {
+  .offscreen-inconsistency-marker::after,
+  .inconsistency-scope-path {
     animation: none;
   }
+
+  .inconsistency-scope-path { stroke-dashoffset: 0; }
 }
 
 .analysis-panel{
@@ -317,6 +363,18 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.conflict-card-category-emoji {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.conflict-card-category-label {
+  color: currentColor;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.78;
 }
 
 .conflict-card-message {

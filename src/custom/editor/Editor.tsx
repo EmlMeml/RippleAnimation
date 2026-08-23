@@ -24,13 +24,15 @@ import FileUploader from "./FileUploader";
 import './../../assets/css/editor.css';
 import { extractFacts } from "./../../analysis/extractesFacts";
 import type { FactExtraction } from "./../../types/facts";
+import type { Predicate } from "./../../types/facts";
 import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
   type Inconsistency,
+  type InconsistencyCategory,
   type InconsistencySeverity,
 } from './../../ai/consistencyChecker';
-import EditorNavigation from "./EditorNavigation";
+import EditorNavigation, { type InconsistentPath } from "./EditorNavigation";
 
 import type { StoryContext } from "../../types/story";
 
@@ -71,8 +73,55 @@ type InconsistentTextRange = BaseRange & {
 type OffscreenInconsistency = {
   index: number;
   severity: InconsistencySeverity;
+  category: InconsistencyCategory;
+  predicate: string;
   edgeOffset: number;
 };
+
+type ScopeConnection = {
+  key: string;
+  path: string;
+};
+
+const INCONSISTENCY_CATEGORY_PRESENTATION: Record<
+  InconsistencyCategory,
+  { emoji: string; label: string }
+> = {
+  exclusive_fact: { emoji: "⚡", label: "Conflicting facts" },
+  opposing_relation: { emoji: "↔️", label: "Opposing relationship" },
+  inverse_relation: { emoji: "🔄", label: "Conflicting inverse relationship" },
+  self_relation: { emoji: "🪞", label: "Invalid self-relationship" },
+  transitive_cycle: { emoji: "🔁", label: "Transitive cycle" },
+  indirect_age_conflict: { emoji: "🕸️", label: "Indirect age conflict" },
+  age_value_conflict: { emoji: "🎂", label: "Conflicting age information" },
+};
+
+const FACT_THEME_PRESENTATION: Record<Predicate, { emoji: string; label: string }> = {
+  age: { emoji: "🎂", label: "Age" },
+  younger_than: { emoji: "🎂", label: "Age" },
+  older_than: { emoji: "🎂", label: "Age" },
+  born_in: { emoji: "📍", label: "Location" },
+  lives_in: { emoji: "📍", label: "Location" },
+  located_in: { emoji: "📍", label: "Location" },
+  works_at: { emoji: "💼", label: "Work" },
+  occupation: { emoji: "💼", label: "Occupation" },
+  gender: { emoji: "👤", label: "Identity" },
+  parent_of: { emoji: "👪", label: "Family" },
+  child_of: { emoji: "👪", label: "Family" },
+  sibling_of: { emoji: "👪", label: "Family" },
+  married_to: { emoji: "💍", label: "Partnership" },
+  friend_of: { emoji: "🤝", label: "Friendship" },
+  owns: { emoji: "📦", label: "Possession" },
+  has: { emoji: "📦", label: "Possession" },
+  participates_in: { emoji: "🎭", label: "Event" },
+};
+
+function getFactThemePresentation(predicate: string) {
+  return FACT_THEME_PRESENTATION[predicate as Predicate] ?? {
+    emoji: "⚠️",
+    label: "General fact",
+  };
+}
 
 type CustomElement =
   | ParagraphElement
@@ -132,12 +181,14 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   }, []);
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
-  const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
+  const [inconsistentPaths, setInconsistentPaths] = useState<InconsistentPath[]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
   const [activeInconsistencyId, setActiveInconsistencyId] =
     useState<string | null>(null);
   const animationReplayVersion = useRef(0);
   const editorScrollRef = useRef<HTMLDivElement>(null);
+  const editorScrollShellRef = useRef<HTMLDivElement>(null);
+  const [scopeConnections, setScopeConnections] = useState<ScopeConnection[]>([]);
   const [offscreenAbove, setOffscreenAbove] =
     useState<OffscreenInconsistency[]>([]);
   const [offscreenBelow, setOffscreenBelow] =
@@ -281,9 +332,9 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     const positions = inconsistencies.map((inconsistency, index) => {
       const id = `inconsistency-${index}`;
       const elements = Array.from(
-        scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
+        scrollContainer.querySelectorAll<HTMLElement>("[data-conflict-inconsistency-ids]")
       ).filter((element) =>
-        element.dataset.inconsistencyIds?.split(" ").includes(id)
+        element.dataset.conflictInconsistencyIds?.split(" ").includes(id)
       );
 
       if (elements.length === 0) {
@@ -300,6 +351,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         return {
           index,
           severity: inconsistency.severity ?? "medium",
+          category: inconsistency.category,
+          predicate: inconsistency.predicate,
           direction: "above" as const,
           distance: viewport.top - closestRect.bottom,
           edgeOffset: Math.min(
@@ -317,6 +370,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         return {
           index,
           severity: inconsistency.severity ?? "medium",
+          category: inconsistency.category,
+          predicate: inconsistency.predicate,
           direction: "below" as const,
           distance: closestRect.top - viewport.bottom,
           edgeOffset: Math.min(
@@ -333,7 +388,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       positions
         .filter((position) => position.direction === direction)
         .sort((a, b) => a.distance - b.distance)
-        .map(({ index, severity, edgeOffset }) => ({ index, severity, edgeOffset }));
+        .map(({ index, severity, category, predicate, edgeOffset }) => ({
+          index,
+          severity,
+          category,
+          predicate,
+          edgeOffset,
+        }));
 
     setOffscreenAbove(markersFor("above"));
     setOffscreenBelow(markersFor("below"));
@@ -356,6 +417,81 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       window.removeEventListener("resize", scheduleUpdate);
     };
   }, [document, inconsistentRanges, updateOffscreenMarkers]);
+
+  const updateScopeConnections = useCallback(() => {
+    const scrollContainer = editorScrollRef.current;
+    const shell = editorScrollShellRef.current;
+
+    if (!scrollContainer || !shell || !activeInconsistencyId) {
+      setScopeConnections([]);
+      return;
+    }
+
+    const shellRect = shell.getBoundingClientRect();
+    const selectorId = activeInconsistencyId;
+    const allElements = Array.from(
+      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
+    ).filter((element) =>
+      element.dataset.inconsistencyIds?.split(" ").includes(selectorId)
+    );
+    const conflictElements = allElements.filter((element) =>
+      element.dataset.conflictInconsistencyIds?.split(" ").includes(selectorId)
+    );
+    const contextElements = allElements.filter((element) =>
+      !element.dataset.conflictInconsistencyIds?.split(" ").includes(selectorId)
+    );
+
+    if (conflictElements.length === 0 || contextElements.length === 0) {
+      setScopeConnections([]);
+      return;
+    }
+
+    const sourceRect = conflictElements
+      .map((element) => element.getBoundingClientRect())
+      .sort((first, second) =>
+        Math.abs(first.top - shellRect.top) - Math.abs(second.top - shellRect.top)
+      )[0];
+    const clampY = (value: number) => Math.min(shellRect.height - 8, Math.max(8, value));
+    const sourceX = Math.max(28, sourceRect.left - shellRect.left);
+    const sourceY = clampY(sourceRect.top + sourceRect.height / 2 - shellRect.top);
+    const railX = 12;
+
+    setScopeConnections(contextElements.map((element, index) => {
+      const targetRect = element.getBoundingClientRect();
+      const targetX = Math.max(28, targetRect.left - shellRect.left);
+      const targetY = clampY(targetRect.top + targetRect.height / 2 - shellRect.top);
+      const sourceControlX = Math.max(railX, sourceX - 24);
+      const targetControlX = Math.max(railX, targetX - 24);
+
+      return {
+        key: `${selectorId}-${index}`,
+        path: [
+          `M ${sourceX} ${sourceY}`,
+          `C ${sourceControlX} ${sourceY}, ${railX} ${sourceY}, ${railX} ${sourceY}`,
+          `L ${railX} ${targetY}`,
+          `C ${railX} ${targetY}, ${targetControlX} ${targetY}, ${targetX} ${targetY}`,
+        ].join(" "),
+      };
+    }));
+  }, [activeInconsistencyId]);
+
+  useEffect(() => {
+    const scrollContainer = editorScrollRef.current;
+
+    if (!scrollContainer) {
+      return;
+    }
+
+    const scheduleUpdate = () => requestAnimationFrame(updateScopeConnections);
+    scheduleUpdate();
+    scrollContainer.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [document, inconsistentRanges, updateScopeConnections]);
 
   
   function replaceEditorContent(nodes: Descendant[]) {
@@ -454,8 +590,8 @@ function getFactParagraphIndex(
 function getInconsistentPaths(
   editor: Editor,
   inconsistencies: Inconsistency[]
-): number[][] {
-  const paths: number[][] = [];
+): InconsistentPath[] {
+  const paths = new Map<string, InconsistentPath>();
 
   for (const inconsistency of inconsistencies) {
     const conflictingFact = getConflictingFact(inconsistency);
@@ -467,13 +603,18 @@ function getInconsistentPaths(
     const paragraphIndex = getFactParagraphIndex(editor, conflictingFact);
 
     if (paragraphIndex !== null) {
-      paths.push([paragraphIndex]);
+      const path = [paragraphIndex];
+      const key = path.join(".");
+      const severity = inconsistency.severity ?? "medium";
+      const existing = paths.get(key);
+
+      if (!existing || isMoreSevere(severity, existing.severity)) {
+        paths.set(key, { path, severity });
+      }
     }
   }
 
-  return Array.from(
-    new Map(paths.map((path) => [path.join("."), path])).values()
-  );
+  return Array.from(paths.values());
 }
 
 function escapeForRegExp(value: string): string {
@@ -823,7 +964,7 @@ function deserialize(
       const text = getEditorText(editor.children);
       console.log('editor-text: ',text);
       if (!text.trim()) {
-        setAnalysisError("Der Editor ist leer.");
+        setAnalysisError("The editor is empty.");
         return;
       }
      
@@ -846,7 +987,7 @@ function deserialize(
         foundInconsistencies.map((inconsistency, index) => ({
           index,
           inconsistency,
-          paths: getInconsistentPaths(editor, [inconsistency]),
+          paths: getInconsistentPaths(editor, [inconsistency]).map(({ path }) => path),
         }))
       );
 
@@ -861,7 +1002,7 @@ function deserialize(
       setAnalysisError(
         error instanceof Error
           ? error.message
-          : "Unbekannter Fehler"
+          : "Unknown error"
       );
     } finally {
       setAnalyzing(false);
@@ -928,7 +1069,7 @@ function deserialize(
             }}
         >
         <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
-        <div className="editor-scroll-shell">
+        <div ref={editorScrollShellRef} className="editor-scroll-shell">
           <div ref={editorScrollRef} className="editor-scroll-container" style={{minHeight:"200px"}}>
             <Editable
             className="editor"
@@ -943,6 +1084,23 @@ function deserialize(
             spellCheck
             />
           </div>
+          {scopeConnections.length > 0 && (
+            <svg
+              className="inconsistency-scope-overlay"
+              width="100%"
+              height="100%"
+              aria-hidden="true"
+            >
+              {scopeConnections.map((connection) => (
+                <path
+                  key={connection.key}
+                  className="inconsistency-scope-path"
+                  d={connection.path}
+                  pathLength="1"
+                />
+              ))}
+            </svg>
+          )}
           {offscreenAbove.length > 0 && (
             <div className="offscreen-inconsistency-markers offscreen-inconsistency-markers--above">
               {offscreenAbove.map((marker) => (
@@ -971,7 +1129,7 @@ function deserialize(
         
       </Slate>
     </div>
-    <aside className="conflict-list" aria-label="Gefundene Inkonsistenzen">
+    <aside className="conflict-list" aria-label="Found inconsistencies">
       <h2>Inconsistencies</h2>
       {inconsistencies.length === 0 ? (
         <p className="conflict-list-empty">
@@ -980,6 +1138,9 @@ function deserialize(
       ) : (
         inconsistencies.map((inconsistency, index) => {
           const severity = inconsistency.severity ?? "medium";
+          const category = INCONSISTENCY_CATEGORY_PRESENTATION[inconsistency.category];
+          const factTheme = getFactThemePresentation(inconsistency.predicate);
+          const presentationLabel = `${factTheme.label} · ${category.label}`;
 
           return (
             <button
@@ -988,6 +1149,17 @@ function deserialize(
               className={`conflict-card conflict-card--${severity}`}
               onClick={() => focusInconsistency(index)}
             >
+              <span
+                className="conflict-card-category-emoji"
+                role="img"
+                aria-label={presentationLabel}
+                title={presentationLabel}
+              >
+                {factTheme.emoji}
+              </span>
+              <span className="conflict-card-category-label">
+                {factTheme.label} · {category.label}
+              </span>
               <span className="conflict-card-severity">{severity}</span>
               <span className="conflict-card-message">
                 {inconsistency.message}
@@ -1010,7 +1182,9 @@ function OffscreenMarker({
   marker: OffscreenInconsistency;
   onClick: () => void;
 }) {
-  const label = `Inkonsistenz ${direction === "above" ? "oberhalb" : "unterhalb"} des sichtbaren Bereichs`;
+  const category = INCONSISTENCY_CATEGORY_PRESENTATION[marker.category];
+  const factTheme = getFactThemePresentation(marker.predicate);
+  const label = `${factTheme.label}: ${category.label}, ${direction === "above" ? "above" : "below"} the visible editor area`;
 
   return (
     <button
@@ -1018,9 +1192,10 @@ function OffscreenMarker({
       className={`offscreen-inconsistency-marker offscreen-inconsistency-marker--${direction} offscreen-inconsistency-marker--${marker.severity}`}
       style={{ left: `${marker.edgeOffset}px` }}
       onClick={onClick}
-      aria-label={`${label}. Zur nächsten Inkonsistenz scrollen.`}
+      aria-label={`${label}. Scroll to this inconsistency.`}
       title={label}
     >
+      <span aria-hidden="true">{factTheme.emoji}</span>
     </button>
   );
 }
@@ -1271,6 +1446,11 @@ function renderLeaf({
       }
       {...attributes}
       data-inconsistency-ids={
+        leaf.inconsistencyRole
+          ? leaf.inconsistencyIds?.join(" ")
+          : undefined
+      }
+      data-conflict-inconsistency-ids={
         leaf.inconsistencyRole === "conflict"
           ? leaf.conflictInconsistencyIds?.join(" ")
           : undefined

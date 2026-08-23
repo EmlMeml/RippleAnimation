@@ -19,8 +19,18 @@ export type InconsistencyImpact =
   | "relationship"
   | "world";
 
+export type InconsistencyCategory =
+  | "exclusive_fact"
+  | "opposing_relation"
+  | "inverse_relation"
+  | "self_relation"
+  | "transitive_cycle"
+  | "indirect_age_conflict"
+  | "age_value_conflict";
+
 export interface Inconsistency {
   type: "conflicting_fact";
+  category: InconsistencyCategory;
   subject: string;
   predicate: string;
   facts: FactExtraction["facts"];
@@ -275,7 +285,7 @@ function assessInconsistency(
       severity: "critical",
       impact: "character",
       impactDescription:
-        "Die Grunddaten der Figur widersprechen sich. Das kann ihre Identität und alle darauf aufbauenden Szenen unklar machen.",
+        "The character's core information is contradictory. This may make their identity and every scene based on it unclear.",
     };
   }
 
@@ -291,7 +301,7 @@ function assessInconsistency(
       severity: "high",
       impact: "relationship",
       impactDescription:
-        "Eine zentrale Beziehung zwischen Figuren ist widersprüchlich. Motivationen, Konflikte oder Familienverhältnisse können dadurch unverständlich werden.",
+        "A central relationship between characters is contradictory. This may make motivations, conflicts, or family relationships difficult to understand.",
     };
   }
 
@@ -301,7 +311,7 @@ function assessInconsistency(
       severity: "medium",
       impact: "world",
       impactDescription:
-        "Der räumliche Kontext der Geschichte ist widersprüchlich. Ortswechsel und die Logik der Welt sollten überprüft werden.",
+        "The story's spatial context is contradictory. Location changes and the logic of the world should be reviewed.",
     };
   }
 
@@ -315,7 +325,7 @@ function assessInconsistency(
       severity: "high",
       impact: "character",
       impactDescription:
-        "Der aktuelle Lebensumstand einer Figur ist widersprüchlich. Das kann Szenen, Handlungen und die Nachvollziehbarkeit der Figur beeinträchtigen.",
+        "The character's current circumstances are contradictory. This may affect scenes, actions, and the character's credibility.",
     };
   }
 
@@ -324,7 +334,7 @@ function assessInconsistency(
     severity: "low",
     impact: "local",
     impactDescription:
-      "Die Inkonsistenz betrifft ein lokales Detail. Sie ist für die Kontinuität relevant, verändert die Handlung aber voraussichtlich nicht unmittelbar.",
+      "The inconsistency concerns a local detail. It is relevant to continuity but is unlikely to affect the plot directly.",
   };
 }
 
@@ -758,6 +768,7 @@ function checkExclusiveFacts(
 
           inconsistencies.push({
             type: "conflicting_fact",
+            category: "exclusive_fact",
             subject,
             predicate,
             facts: [
@@ -765,7 +776,7 @@ function checkExclusiveFacts(
               factB,
             ],
             message:
-              `${subject} hat widersprüchliche Angaben für ` +
+              `${subject} has conflicting information for ` +
               `"${predicate}".`,
           });
         }
@@ -833,6 +844,7 @@ function checkOpposingPredicates(
 
       inconsistencies.push({
         type: "conflicting_fact",
+        category: "opposing_relation",
         subject: factA.subject,
         predicate: predicateA,
         facts: [
@@ -840,9 +852,8 @@ function checkOpposingPredicates(
           matchingFact,
         ],
         message:
-          `${factA.subject} hat widersprüchliche ` +
-          `Angaben: "${predicateA}" und ` +
-          `"${predicateB}".`,
+          `${factA.subject} has conflicting relationships: ` +
+          `"${predicateA}" and "${predicateB}".`,
       });
     }
   }
@@ -926,6 +937,7 @@ function checkContradictoryInverseDirections(
 
       inconsistencies.push({
         type: "conflicting_fact",
+        category: "inverse_relation",
         subject: factA.subject,
         predicate: factA.predicate,
         facts: [
@@ -933,9 +945,9 @@ function checkContradictoryInverseDirections(
           matchingFact,
         ],
         message:
-          `${factA.subject} kann nicht gleichzeitig ` +
-          `"${predicateA}" und "${predicateB}" ` +
-          `zu ${factA.object} sein.`,
+          `${factA.subject} cannot simultaneously be ` +
+          `"${predicateA}" and "${predicateB}" ` +
+          `in relation to ${factA.object}.`,
       });
     }
   }
@@ -969,13 +981,13 @@ function checkSelfRelations(
 
     inconsistencies.push({
       type: "conflicting_fact",
+      category: "self_relation",
       subject: fact.subject,
       predicate: fact.predicate,
       facts: [fact],
       message:
-        `${fact.subject} kann nicht über ` +
-        `"${fact.predicate}" mit sich selbst ` +
-        `in Beziehung stehen.`,
+        `${fact.subject} cannot have a ` +
+        `"${fact.predicate}" relationship with itself.`,
     });
   }
 
@@ -1254,6 +1266,7 @@ function checkIndirectAgeConflicts(
 
       inconsistencies.push({
         type: "conflicting_fact",
+        category: "indirect_age_conflict",
         subject: fact.subject,
         predicate,
         facts: [
@@ -1261,9 +1274,8 @@ function checkIndirectAgeConflicts(
           oppositeFact,
         ],
         message:
-          `${fact.subject} hat widersprüchliche ` +
-          `Altersbeziehungen: "${predicate}" ` +
-          `und "${oppositePredicate}".`,
+          `${fact.subject} has conflicting age relationships: ` +
+          `"${predicate}" and "${oppositePredicate}".`,
       });
     }
   }
@@ -1343,6 +1355,7 @@ function checkAgeAgainstAgeRelations(
 
     inconsistencies.push({
       type: "conflicting_fact",
+      category: "age_value_conflict",
       subject: relation.subject,
       predicate: relation.predicate,
       facts: [
@@ -1351,8 +1364,8 @@ function checkAgeAgainstAgeRelations(
         relation,
       ],
       message:
-        `${relation.subject} ist laut Altersangaben ` +
-        `nicht "${relation.predicate}" ${relation.object}.`,
+        `According to the stated ages, ${relation.subject} is not ` +
+        `"${relation.predicate}" ${relation.object}.`,
     });
   }
 
@@ -1491,6 +1504,7 @@ function checkAgeRelationsAgainstAgeFacts(
 
         inconsistencies.push({
           type: "conflicting_fact",
+          category: "age_value_conflict",
           subject: relationFact.subject,
           predicate: relationFact.predicate,
           facts: [
@@ -1499,9 +1513,9 @@ function checkAgeRelationsAgainstAgeFacts(
             relationFact,
           ],
           message:
-            `${relationFact.subject} kann nicht ` +
-            `"${relationFact.predicate}" ${relationFact.object} sein, ` +
-            `weil das Alter ${subjectAge} zu ${objectAge} beträgt.`,
+            `${relationFact.subject} cannot be ` +
+            `"${relationFact.predicate}" ${relationFact.object}, ` +
+            `because their ages are ${subjectAge} and ${objectAge}.`,
         });
       }
     }
@@ -1550,12 +1564,13 @@ function checkTransitivePredicates(
       ) {
         inconsistencies.push({
           type: "conflicting_fact",
+          category: "transitive_cycle",
           subject: fact.subject,
           predicate,
           facts: [fact],
           message:
-            `${fact.subject} ist in einem ` +
-            `transitiven Zyklus für "${predicate}".`,
+            `${fact.subject} is part of a ` +
+            `transitive cycle for "${predicate}".`,
         });
 
         /*
