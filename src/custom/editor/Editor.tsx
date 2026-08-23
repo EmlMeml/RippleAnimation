@@ -33,6 +33,8 @@ import {
   type InconsistencySeverity,
 } from './../../ai/consistencyChecker';
 import EditorNavigation, { type InconsistentPath } from "./EditorNavigation";
+import { EXAMPLE_TEXT } from "./exampleText";
+import { EXAMPLE_FACTS } from "./exampleFacts";
 
 import type { StoryContext } from "../../types/story";
 
@@ -76,9 +78,19 @@ type OffscreenInconsistency = {
   category: InconsistencyCategory;
   predicate: string;
   edgeOffset: number;
+  opacity: number;
 };
 
-type ScopeConnection = {
+type OffscreenFactPreview = {
+  key: string;
+  direction: "above" | "below";
+  before: string;
+  fact: string;
+  after: string;
+  distance: number;
+};
+
+type FactPreviewConnection = {
   key: string;
   path: string;
 };
@@ -185,14 +197,23 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
   const [activeInconsistencyId, setActiveInconsistencyId] =
     useState<string | null>(null);
+  const [selectedInconsistencyId, setSelectedInconsistencyId] =
+    useState<string | null>(null);
+  const [jitterSuppressedIds, setJitterSuppressedIds] =
+    useState<Set<string>>(() => new Set());
   const animationReplayVersion = useRef(0);
+  const useExampleFactsRef = useRef(false);
+  const exampleDocumentTextRef = useRef("");
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const editorScrollShellRef = useRef<HTMLDivElement>(null);
-  const [scopeConnections, setScopeConnections] = useState<ScopeConnection[]>([]);
   const [offscreenAbove, setOffscreenAbove] =
     useState<OffscreenInconsistency[]>([]);
   const [offscreenBelow, setOffscreenBelow] =
     useState<OffscreenInconsistency[]>([]);
+  const [offscreenFactPreviews, setOffscreenFactPreviews] =
+    useState<OffscreenFactPreview[]>([]);
+  const [factPreviewConnections, setFactPreviewConnections] =
+    useState<FactPreviewConnection[]>([]);
 
   const [, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -278,6 +299,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   function focusInconsistency(index: number) {
     const inconsistencyId = `inconsistency-${index}`;
+
+    if (selectedInconsistencyId === inconsistencyId) {
+      setSelectedInconsistencyId(null);
+      setActiveInconsistencyId(null);
+      return;
+    }
+
     const range = inconsistentRanges.find(
       (candidate) => candidate.conflictInconsistencyIds.includes(inconsistencyId)
     );
@@ -287,6 +315,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     }
 
     setActiveInconsistencyId(inconsistencyId);
+    setSelectedInconsistencyId(inconsistencyId);
     animationReplayVersion.current += 1;
     const replayVersion = animationReplayVersion.current;
 
@@ -319,6 +348,22 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     } catch (error) {
       console.error("Navigation zur Inkonsistenz fehlgeschlagen:", error);
     }
+  }
+
+  function handleInconsistencyHover(inconsistencyId: string | null) {
+    if (inconsistencyId) {
+      setJitterSuppressedIds((current) => {
+        if (current.has(inconsistencyId)) {
+          return current;
+        }
+
+        const next = new Set(current);
+        next.add(inconsistencyId);
+        return next;
+      });
+    }
+
+    setActiveInconsistencyId(inconsistencyId ?? selectedInconsistencyId);
   }
 
   const updateOffscreenMarkers = useCallback(() => {
@@ -384,17 +429,59 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       return null;
     }).filter((position): position is NonNullable<typeof position> => position !== null);
 
-    const markersFor = (direction: "above" | "below") =>
-      positions
+    const markersFor = (direction: "above" | "below") => {
+      const minimumOffset = 16;
+      const maximumOffset = Math.max(minimumOffset, viewport.width - 16);
+      const markerGap = 28;
+      const markers = positions
         .filter((position) => position.direction === direction)
-        .sort((a, b) => a.distance - b.distance)
-        .map(({ index, severity, category, predicate, edgeOffset }) => ({
+        .sort((a, b) => a.edgeOffset - b.edgeOffset)
+        .map(({ index, severity, category, predicate, edgeOffset, distance }) => ({
           index,
           severity,
           category,
           predicate,
           edgeOffset,
+          opacity: Math.max(
+            0.18,
+            1 - (distance / Math.max(1, viewport.height * 1.5)) * 0.82
+          ),
         }));
+
+      /* Marker möglichst an ihrer Textprojektion belassen, aber von links
+       * nach rechts so weit auseinanderschieben, dass Kreis und Ripple nicht
+       * aufeinanderliegen. */
+      for (let index = 1; index < markers.length; index += 1) {
+        markers[index].edgeOffset = Math.max(
+          markers[index].edgeOffset,
+          markers[index - 1].edgeOffset + markerGap
+        );
+      }
+
+      if (markers.length > 0 && markers.at(-1)!.edgeOffset > maximumOffset) {
+        markers[markers.length - 1].edgeOffset = maximumOffset;
+
+        for (let index = markers.length - 2; index >= 0; index -= 1) {
+          markers[index].edgeOffset = Math.min(
+            markers[index].edgeOffset,
+            markers[index + 1].edgeOffset - markerGap
+          );
+        }
+      }
+
+      if (markers.length > 0 && markers[0].edgeOffset < minimumOffset) {
+        markers[0].edgeOffset = minimumOffset;
+
+        for (let index = 1; index < markers.length; index += 1) {
+          markers[index].edgeOffset = Math.max(
+            markers[index].edgeOffset,
+            markers[index - 1].edgeOffset + markerGap
+          );
+        }
+      }
+
+      return markers;
+    };
 
     setOffscreenAbove(markersFor("above"));
     setOffscreenBelow(markersFor("below"));
@@ -418,61 +505,72 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     };
   }, [document, inconsistentRanges, updateOffscreenMarkers]);
 
-  const updateScopeConnections = useCallback(() => {
+  const updateOffscreenFactPreviews = useCallback(() => {
     const scrollContainer = editorScrollRef.current;
-    const shell = editorScrollShellRef.current;
 
-    if (!scrollContainer || !shell || !activeInconsistencyId) {
-      setScopeConnections([]);
+    if (!scrollContainer || !activeInconsistencyId) {
+      setOffscreenFactPreviews([]);
       return;
     }
 
-    const shellRect = shell.getBoundingClientRect();
-    const selectorId = activeInconsistencyId;
-    const allElements = Array.from(
+    const viewport = scrollContainer.getBoundingClientRect();
+    const contextElements = Array.from(
       scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
     ).filter((element) =>
-      element.dataset.inconsistencyIds?.split(" ").includes(selectorId)
-    );
-    const conflictElements = allElements.filter((element) =>
-      element.dataset.conflictInconsistencyIds?.split(" ").includes(selectorId)
-    );
-    const contextElements = allElements.filter((element) =>
-      !element.dataset.conflictInconsistencyIds?.split(" ").includes(selectorId)
+      element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId) &&
+      !element.dataset.conflictInconsistencyIds?.split(" ").includes(activeInconsistencyId)
     );
 
-    if (conflictElements.length === 0 || contextElements.length === 0) {
-      setScopeConnections([]);
-      return;
-    }
+    const previews = contextElements.flatMap((element, index): OffscreenFactPreview[] => {
+      const rect = element.getBoundingClientRect();
+      const direction = rect.bottom < viewport.top
+        ? "above"
+        : rect.top > viewport.bottom
+          ? "below"
+          : null;
 
-    const sourceRect = conflictElements
-      .map((element) => element.getBoundingClientRect())
-      .sort((first, second) =>
-        Math.abs(first.top - shellRect.top) - Math.abs(second.top - shellRect.top)
-      )[0];
-    const clampY = (value: number) => Math.min(shellRect.height - 8, Math.max(8, value));
-    const sourceX = Math.max(28, sourceRect.left - shellRect.left);
-    const sourceY = clampY(sourceRect.top + sourceRect.height / 2 - shellRect.top);
-    const railX = 12;
+      if (!direction) {
+        return [];
+      }
 
-    setScopeConnections(contextElements.map((element, index) => {
-      const targetRect = element.getBoundingClientRect();
-      const targetX = Math.max(28, targetRect.left - shellRect.left);
-      const targetY = clampY(targetRect.top + targetRect.height / 2 - shellRect.top);
-      const sourceControlX = Math.max(railX, sourceX - 24);
-      const targetControlX = Math.max(railX, targetX - 24);
+      const block = element.closest("p, h1, h2, h3, blockquote") as HTMLElement | null;
+      const fact = element.textContent?.trim() ?? "";
 
-      return {
-        key: `${selectorId}-${index}`,
-        path: [
-          `M ${sourceX} ${sourceY}`,
-          `C ${sourceControlX} ${sourceY}, ${railX} ${sourceY}, ${railX} ${sourceY}`,
-          `L ${railX} ${targetY}`,
-          `C ${railX} ${targetY}, ${targetControlX} ${targetY}, ${targetX} ${targetY}`,
-        ].join(" "),
-      };
-    }));
+      if (!block || !fact) {
+        return [];
+      }
+
+      const precedingRange = window.document.createRange();
+      precedingRange.selectNodeContents(block);
+      precedingRange.setEndBefore(element);
+      const blockText = block.textContent ?? "";
+      const factStart = precedingRange.toString().length;
+      const factEnd = factStart + fact.length;
+      const sentenceStart = Math.max(
+        blockText.lastIndexOf(".", Math.max(0, factStart - 1)),
+        blockText.lastIndexOf("!", Math.max(0, factStart - 1)),
+        blockText.lastIndexOf("?", Math.max(0, factStart - 1))
+      ) + 1;
+      const endings = [".", "!", "?"]
+        .map((character) => blockText.indexOf(character, factEnd))
+        .filter((position) => position >= 0);
+      const sentenceEnd = endings.length > 0
+        ? Math.min(...endings) + 1
+        : blockText.length;
+
+      return [{
+        key: `${activeInconsistencyId}-${index}`,
+        direction,
+        before: blockText.slice(sentenceStart, factStart).trimStart(),
+        fact: blockText.slice(factStart, factEnd),
+        after: blockText.slice(factEnd, sentenceEnd).trimEnd(),
+        distance: direction === "above"
+          ? viewport.top - rect.bottom
+          : rect.top - viewport.bottom,
+      }];
+    });
+
+    setOffscreenFactPreviews(previews.sort((first, second) => first.distance - second.distance));
   }, [activeInconsistencyId]);
 
   useEffect(() => {
@@ -482,7 +580,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       return;
     }
 
-    const scheduleUpdate = () => requestAnimationFrame(updateScopeConnections);
+    const scheduleUpdate = () => requestAnimationFrame(updateOffscreenFactPreviews);
     scheduleUpdate();
     scrollContainer.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
@@ -491,7 +589,96 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       scrollContainer.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
     };
-  }, [document, inconsistentRanges, updateScopeConnections]);
+  }, [document, inconsistentRanges, updateOffscreenFactPreviews]);
+
+  const updateFactPreviewConnections = useCallback(() => {
+    const scrollContainer = editorScrollRef.current;
+    const shell = editorScrollShellRef.current;
+
+    if (
+      !scrollContainer ||
+      !shell ||
+      !activeInconsistencyId ||
+      offscreenFactPreviews.length === 0
+    ) {
+      setFactPreviewConnections([]);
+      return;
+    }
+
+    const shellRect = shell.getBoundingClientRect();
+    const conflictElement = Array.from(
+      scrollContainer.querySelectorAll<HTMLElement>("[data-conflict-inconsistency-ids]")
+    ).find((element) =>
+      element.dataset.conflictInconsistencyIds
+        ?.split(" ")
+        .includes(activeInconsistencyId)
+    );
+
+    if (!conflictElement) {
+      setFactPreviewConnections([]);
+      return;
+    }
+
+    const sourceRect = conflictElement.getBoundingClientRect();
+    const sourceX = Math.min(
+      shellRect.width - 12,
+      Math.max(12, sourceRect.left + sourceRect.width / 2 - shellRect.left)
+    );
+    const sourceY = Math.min(
+      shellRect.height - 8,
+      Math.max(8, sourceRect.top + sourceRect.height / 2 - shellRect.top)
+    );
+    const previewElements = Array.from(
+      shell.querySelectorAll<HTMLElement>("[data-fact-preview-key]")
+    );
+
+    setFactPreviewConnections(offscreenFactPreviews.flatMap((preview) => {
+      const previewElement = previewElements.find(
+        (element) => element.dataset.factPreviewKey === preview.key
+      );
+
+      if (!previewElement) {
+        return [];
+      }
+
+      const previewRect = previewElement.getBoundingClientRect();
+      const targetX = previewRect.left + previewRect.width / 2 - shellRect.left;
+      const targetY = preview.direction === "above"
+        ? previewRect.bottom - shellRect.top
+        : previewRect.top - shellRect.top;
+      const railX = 12;
+      const sourceControlX = Math.max(railX, sourceX - 26);
+      const targetControlX = Math.max(railX, targetX - 26);
+
+      return [{
+        key: preview.key,
+        path: [
+          `M ${sourceX} ${sourceY}`,
+          `C ${sourceControlX} ${sourceY}, ${railX} ${sourceY}, ${railX} ${sourceY}`,
+          `L ${railX} ${targetY}`,
+          `C ${railX} ${targetY}, ${targetControlX} ${targetY}, ${targetX} ${targetY}`,
+        ].join(" "),
+      }];
+    }));
+  }, [activeInconsistencyId, offscreenFactPreviews]);
+
+  useEffect(() => {
+    const scrollContainer = editorScrollRef.current;
+
+    if (!scrollContainer) {
+      return;
+    }
+
+    const scheduleUpdate = () => requestAnimationFrame(updateFactPreviewConnections);
+    scheduleUpdate();
+    scrollContainer.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [updateFactPreviewConnections]);
 
   
   function replaceEditorContent(nodes: Descendant[]) {
@@ -929,6 +1116,8 @@ function deserialize(
     }
 
   function handleHtmlLoad(html: string) {
+    useExampleFactsRef.current = false;
+    exampleDocumentTextRef.current = "";
     const nodes = htmlToSlate(html);
 
     if (nodes.length === 0) {
@@ -942,6 +1131,8 @@ function deserialize(
     }
 
   function handleFileLoad(text: string) {
+    useExampleFactsRef.current = false;
+    exampleDocumentTextRef.current = "";
     const paragraphs: ParagraphElement[] = text
       .split(/\r?\n/)
       .map((line) => ({
@@ -956,6 +1147,26 @@ function deserialize(
     });
   }
 
+  function handleExampleLoad() {
+    const paragraphs: ParagraphElement[] = EXAMPLE_TEXT
+      .split(/\r?\n\s*\r?\n/)
+      .map((paragraph) => ({
+        type: "paragraph",
+        children: [{ text: paragraph.trim() }],
+      }));
+
+    useExampleFactsRef.current = true;
+    exampleDocumentTextRef.current = getEditorText(paragraphs);
+    setAnalysis(null);
+    setInconsistencies([]);
+    setInconsistentPaths([]);
+    setInconsistentRanges([]);
+    setActiveInconsistencyId(null);
+    setSelectedInconsistencyId(null);
+    setJitterSuppressedIds(new Set());
+    replaceEditorContent(paragraphs);
+  }
+
   async function handleAnalyze() {
     setAnalyzing(true);
     setAnalysisError("");
@@ -968,7 +1179,9 @@ function deserialize(
         return;
       }
      
-      const result = await extractFacts(text,context);
+      const result = useExampleFactsRef.current
+        ? EXAMPLE_FACTS
+        : await extractFacts(text,context);
 
       setAnalysis(result);
 
@@ -1008,6 +1221,12 @@ function deserialize(
       setAnalyzing(false);
     }
   }
+
+  const activeInconsistencyIndex = activeInconsistencyId
+    ? Number(activeInconsistencyId.replace("inconsistency-", ""))
+    : -1;
+  const activeInconsistencyImpact =
+    inconsistencies[activeInconsistencyIndex]?.impact ?? null;
 
   return (
     <div className="content-container">
@@ -1050,6 +1269,14 @@ function deserialize(
             editor={editor}
             initialValue={initialValue}
             onValueChange={(value) => {
+              if (
+                useExampleFactsRef.current &&
+                getEditorText(value) !== exampleDocumentTextRef.current
+              ) {
+                useExampleFactsRef.current = false;
+                exampleDocumentTextRef.current = "";
+              }
+
               /*
                * Slate mutiert `editor.children` direkt. Die Navigation braucht
                * deshalb bei jeder Inhaltsänderung einen neuen React-Snapshot.
@@ -1068,39 +1295,70 @@ function deserialize(
               );
             }}
         >
-        <Toolbar  onTextLoad={handleFileLoad} onHtmlLoad={handleHtmlLoad} onAnalyze={handleAnalyze} analyzing={analyzing} />
+        <Toolbar
+          onTextLoad={handleFileLoad}
+          onHtmlLoad={handleHtmlLoad}
+          onExampleLoad={handleExampleLoad}
+          onAnalyze={handleAnalyze}
+          analyzing={analyzing}
+        />
         <div ref={editorScrollShellRef} className="editor-scroll-shell">
           <div ref={editorScrollRef} className="editor-scroll-container" style={{minHeight:"200px"}}>
             <Editable
-            className="editor"
+            className={`editor${activeInconsistencyId ? " editor--scope-active" : ""}`}
             placeholder="Text eingeben ..."
             renderElement={renderElement}
             renderLeaf={(props) => renderLeaf({
               ...props,
               activeInconsistencyId,
-              onConflictHoverChange: setActiveInconsistencyId,
+              activeInconsistencyImpact,
+              jitterSuppressedIds,
+              onConflictHoverChange: handleInconsistencyHover,
             })}
             decorate={decorateInconsistencies}
             spellCheck
             />
           </div>
-          {scopeConnections.length > 0 && (
+          {factPreviewConnections.length > 0 && (
             <svg
-              className="inconsistency-scope-overlay"
+              className="fact-preview-connection-overlay"
               width="100%"
               height="100%"
               aria-hidden="true"
             >
-              {scopeConnections.map((connection) => (
+              {factPreviewConnections.map((connection) => (
                 <path
                   key={connection.key}
-                  className="inconsistency-scope-path"
+                  className="fact-preview-connection"
                   d={connection.path}
                   pathLength="1"
                 />
               ))}
             </svg>
           )}
+          {(["above", "below"] as const).map((direction) => {
+            const previews = offscreenFactPreviews.filter(
+              (preview) => preview.direction === direction
+            );
+
+            return previews.length > 0 ? (
+              <div
+                key={direction}
+                className={`offscreen-fact-previews offscreen-fact-previews--${direction}`}
+                aria-live="polite"
+              >
+                {previews.map((preview) => (
+                  <div
+                    key={preview.key}
+                    className="offscreen-fact-preview"
+                    data-fact-preview-key={preview.key}
+                  >
+                    {preview.before}<mark>{preview.fact}</mark>{preview.after}
+                  </div>
+                ))}
+              </div>
+            ) : null;
+          })}
           {offscreenAbove.length > 0 && (
             <div className="offscreen-inconsistency-markers offscreen-inconsistency-markers--above">
               {offscreenAbove.map((marker) => (
@@ -1146,8 +1404,17 @@ function deserialize(
             <button
               key={index}
               type="button"
-              className={`conflict-card conflict-card--${severity}`}
+              className={[
+                "conflict-card",
+                `conflict-card--${severity}`,
+                selectedInconsistencyId === `inconsistency-${index}`
+                  ? "conflict-card--selected"
+                  : "",
+              ].filter(Boolean).join(" ")}
               onClick={() => focusInconsistency(index)}
+              aria-pressed={selectedInconsistencyId === `inconsistency-${index}`}
+              onMouseEnter={() => handleInconsistencyHover(`inconsistency-${index}`)}
+              onMouseLeave={() => handleInconsistencyHover(null)}
             >
               <span
                 className="conflict-card-category-emoji"
@@ -1190,7 +1457,10 @@ function OffscreenMarker({
     <button
       type="button"
       className={`offscreen-inconsistency-marker offscreen-inconsistency-marker--${direction} offscreen-inconsistency-marker--${marker.severity}`}
-      style={{ left: `${marker.edgeOffset}px` }}
+      style={{
+        left: `${marker.edgeOffset}px`,
+        opacity: marker.opacity,
+      }}
       onClick={onClick}
       aria-label={`${label}. Scroll to this inconsistency.`}
       title={label}
@@ -1207,11 +1477,13 @@ function OffscreenMarker({
 function Toolbar({
     onTextLoad,
     onHtmlLoad,
+    onExampleLoad,
     onAnalyze,
     analyzing
 }:{
     onTextLoad: (text:string) => void;
     onHtmlLoad: (text:string) => void;
+    onExampleLoad: () => void;
     onAnalyze: () => void;
     analyzing: boolean;
 }) {
@@ -1229,6 +1501,15 @@ function Toolbar({
       </BlockButton>
       <LinkButton />
       <FileUploader onTextLoad={onTextLoad} onHtmlLoad={onHtmlLoad}></FileUploader>
+      <button
+        type="button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onExampleLoad();
+        }}
+      >
+        Example Text
+      </button>
       <button
       type="button"
       style={{color:'#2b311c'}}
@@ -1417,8 +1698,16 @@ function renderLeaf({
   children,
   leaf,
   activeInconsistencyId,
+  activeInconsistencyImpact,
+  jitterSuppressedIds,
   onConflictHoverChange,
 }: any) {
+  const belongsToActiveScope =
+    activeInconsistencyId !== null &&
+    leaf.inconsistencyIds?.includes(activeInconsistencyId);
+  const suppressJitter = leaf.inconsistencyIds?.some(
+    (id: string) => jitterSuppressedIds.has(id)
+  );
   if (leaf.bold) {
     children = <strong>{children}</strong>;
   }
@@ -1434,7 +1723,10 @@ function renderLeaf({
   return (
     <span
       style={
-        leaf.inconsistencyRole === "conflict" && leaf.replayVersion
+        leaf.inconsistencyRole === "conflict" &&
+        leaf.replayVersion &&
+        !belongsToActiveScope &&
+        !suppressJitter
           ? {
               animationName:
                 leaf.replayVersion % 2 === 0
@@ -1462,13 +1754,24 @@ function renderLeaf({
               `inconsistent-text--${
                 leaf.inconsistencySeverity ?? "medium"
               }`,
-            ].join(" ")
+              belongsToActiveScope ? "inconsistency-scope-active" : "",
+              belongsToActiveScope
+                ? `inconsistency-scope-active--${activeInconsistencyImpact}`
+                : "",
+              belongsToActiveScope ? "inconsistency-scope-active--conflict" : "",
+              suppressJitter ? "inconsistent-text--no-jitter" : "",
+            ].filter(Boolean).join(" ")
           : leaf.inconsistencyRole === "context"
             ? [
                 "inconsistency-context",
-                leaf.inconsistencyIds?.includes(activeInconsistencyId)
+                belongsToActiveScope
                   ? "inconsistency-context--active"
                   : "",
+                belongsToActiveScope ? "inconsistency-scope-active" : "",
+                belongsToActiveScope
+                  ? `inconsistency-scope-active--${activeInconsistencyImpact}`
+                  : "",
+                belongsToActiveScope ? "inconsistency-scope-active--context" : "",
               ].filter(Boolean).join(" ")
             : undefined
       }
