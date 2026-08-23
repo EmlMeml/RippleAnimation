@@ -135,8 +135,10 @@ export interface Fact {
    * facts appear in the story.
    */
   source?: {
-    start: number;
-    end: number;
+    /** Index des Slate-Absatzes, aus dem der Fact extrahiert wurde. */
+    paragraphIndex?: number;
+    start?: number;
+    end?: number;
   };
 }
 

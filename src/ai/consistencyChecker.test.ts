@@ -2956,6 +2956,10 @@ it("currently treats a shared ancestor as compatible even when temporal ranges d
       ],
       message:
         'anna hat widersprüchliche Angaben für "located_in".',
+      severity: "medium",
+      impact: "world",
+      impactDescription:
+        "Der räumliche Kontext der Geschichte ist widersprüchlich. Ortswechsel und die Logik der Welt sollten überprüft werden.",
     },
   ]);
 });

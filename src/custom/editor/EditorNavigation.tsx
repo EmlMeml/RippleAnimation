@@ -14,7 +14,7 @@ type EditorNavigationProps = {
   onNavigate: (path: number[]) => void;
 };
 
-const MIN_HEIGHT = 12;
+const MIN_HEIGHT = 24;
 const MAX_HEIGHT = 240;
 const HEIGHT_PER_CHARACTER = 0.36;
 

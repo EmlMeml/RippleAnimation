@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   createEditor,
   type BaseRange,
@@ -28,6 +28,7 @@ import { getEditorText } from "./getEditorText";
 import {
   checkConsistency,
   type Inconsistency,
+  type InconsistencySeverity,
 } from './../../ai/consistencyChecker';
 import EditorNavigation from "./EditorNavigation";
 
@@ -61,6 +62,9 @@ type MarkFormat = Exclude<keyof CustomText, "text" | "inconsistent">;
 type InconsistentTextRange = BaseRange & {
   inconsistent: true;
   inconsistencyRole: "conflict" | "context";
+  inconsistencySeverity?: InconsistencySeverity;
+  inconsistencyIds: string[];
+  replayVersion?: number;
 };
 
 type CustomElement =
@@ -76,6 +80,9 @@ declare module "slate" {
     Range: BaseRange & {
       inconsistent?: boolean;
       inconsistencyRole?: "conflict" | "context";
+      inconsistencySeverity?: InconsistencySeverity;
+      inconsistencyIds?: string[];
+      replayVersion?: number;
     };
   }
 }
@@ -119,8 +126,11 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
   const [inconsistentPaths, setInconsistentPaths] = useState<number[][]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
+  const [activeInconsistencyId, setActiveInconsistencyId] =
+    useState<string | null>(null);
+  const animationReplayVersion = useRef(0);
 
-  const [analysis, setAnalysis] =
+  const [, setAnalysis] =
     useState<FactExtraction | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -141,6 +151,53 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     },
     [inconsistentRanges]
   );
+
+  function focusInconsistency(index: number) {
+    const inconsistencyId = `inconsistency-${index}`;
+    const range = inconsistentRanges.find(
+      (candidate) =>
+        candidate.inconsistencyRole === "conflict" &&
+        candidate.inconsistencyIds.includes(inconsistencyId)
+    );
+
+    if (!range) {
+      return;
+    }
+
+    setActiveInconsistencyId(inconsistencyId);
+    animationReplayVersion.current += 1;
+    const replayVersion = animationReplayVersion.current;
+
+    setInconsistentRanges((ranges) =>
+      ranges.map((candidate) =>
+        candidate.inconsistencyIds.includes(inconsistencyId)
+          ? { ...candidate, replayVersion }
+          : candidate
+      )
+    );
+
+    try {
+      const blockPath = [range.anchor.path[0]];
+      const point = Editor.start(editor, blockPath);
+
+      Transforms.select(editor, {
+        anchor: point,
+        focus: point,
+      });
+
+      const element = ReactEditor.toDOMNode(
+        editor,
+        Editor.node(editor, blockPath)[0]
+      );
+
+      element.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    } catch (error) {
+      console.error("Navigation zur Inkonsistenz fehlgeschlagen:", error);
+    }
+  }
 
   
   function replaceEditorContent(nodes: Descendant[]) {
@@ -191,8 +248,9 @@ function getInconsistentPaths(
 
   for (const inconsistency of inconsistencies) {
     const conflictingFact =
-      inconsistency.facts.find(
-        (fact) =>
+      inconsistency.facts
+        .filter(
+          (fact) =>
           normalizeSearchText(fact.subject) ===
             normalizeSearchText(
               inconsistency.subject
@@ -200,10 +258,27 @@ function getInconsistentPaths(
           normalizeSearchText(fact.predicate) ===
             normalizeSearchText(
               inconsistency.predicate
-            )
-      );
+          )
+        )
+        .sort(
+          (first, second) =>
+            (first.source?.paragraphIndex ?? first.source?.start ?? -1) -
+            (second.source?.paragraphIndex ?? second.source?.start ?? -1)
+        )
+        .at(-1);
 
     if (!conflictingFact) {
+      continue;
+    }
+
+    const paragraphIndex =
+      conflictingFact.source?.paragraphIndex;
+
+    if (
+      paragraphIndex !== undefined &&
+      editor.children[paragraphIndex] !== undefined
+    ) {
+      paths.push([paragraphIndex]);
       continue;
     }
 
@@ -277,11 +352,30 @@ function getInconsistentPaths(
     }
   }
 
-  return paths;
+  return Array.from(
+    new Map(paths.map((path) => [path.join("."), path])).values()
+  );
 }
 
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isMoreSevere(
+  candidate: InconsistencySeverity | undefined,
+  current: InconsistencySeverity | undefined
+): boolean {
+  const severityRank: Record<InconsistencySeverity, number> = {
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4,
+  };
+
+  return (
+    severityRank[candidate ?? "medium"] >
+    severityRank[current ?? "medium"]
+  );
 }
 
 function getFactHighlightPattern(
@@ -321,10 +415,12 @@ function getInconsistentTextRanges(
 ): InconsistentTextRange[] {
   const ranges: InconsistentTextRange[] = [];
 
-  for (const inconsistency of inconsistencies) {
+  for (const [index, inconsistency] of inconsistencies.entries()) {
+    const inconsistencyId = `inconsistency-${index}`;
     const conflictFact = [...inconsistency.facts].sort(
       (first, second) =>
-        (first.source?.start ?? 0) - (second.source?.start ?? 0)
+        (first.source?.paragraphIndex ?? first.source?.start ?? 0) -
+        (second.source?.paragraphIndex ?? second.source?.start ?? 0)
     ).at(-1);
 
     for (const fact of inconsistency.facts) {
@@ -334,6 +430,13 @@ function getInconsistentTextRanges(
       }
 
       for (const [node, path] of SlateNode.texts(editor)) {
+        if (
+          fact.source?.paragraphIndex !== undefined &&
+          path[0] !== fact.source.paragraphIndex
+        ) {
+          continue;
+        }
+
         const block = editor.children[path[0]];
         const blockText = block ? normalizeSearchText(getNodeText(block)) : "";
         const subject = normalizeSearchText(fact.subject);
@@ -358,8 +461,25 @@ function getInconsistentTextRanges(
           );
 
           if (existingRange) {
+            if (!existingRange.inconsistencyIds.includes(inconsistencyId)) {
+              existingRange.inconsistencyIds.push(inconsistencyId);
+            }
+
             if (fact === conflictFact) {
+              const wasContextRange =
+                existingRange.inconsistencyRole !== "conflict";
+
               existingRange.inconsistencyRole = "conflict";
+              if (
+                wasContextRange ||
+                isMoreSevere(
+                  inconsistency.severity,
+                  existingRange.inconsistencySeverity
+                )
+              ) {
+                existingRange.inconsistencySeverity =
+                  inconsistency.severity;
+              }
             }
             continue;
           }
@@ -370,6 +490,11 @@ function getInconsistentTextRanges(
             inconsistent: true,
             inconsistencyRole:
               fact === conflictFact ? "conflict" : "context",
+            inconsistencySeverity:
+              fact === conflictFact
+                ? inconsistency.severity
+                : undefined,
+            inconsistencyIds: [inconsistencyId],
           });
         }
       }
@@ -593,6 +718,15 @@ function deserialize(
         foundInconsistencies
       );
 
+      console.log(
+        "Inconsistencies with editor paths:",
+        foundInconsistencies.map((inconsistency, index) => ({
+          index,
+          inconsistency,
+          paths: getInconsistentPaths(editor, [inconsistency]),
+        }))
+      );
+
       setInconsistentPaths(paths);
       setInconsistentRanges(
         getInconsistentTextRanges(editor, foundInconsistencies)
@@ -676,64 +810,44 @@ function deserialize(
             className="editor"
             placeholder="Text eingeben ..."
             renderElement={renderElement}
-            renderLeaf={renderLeaf}
+            renderLeaf={(props) => renderLeaf({
+              ...props,
+              activeInconsistencyId,
+              onConflictHoverChange: setActiveInconsistencyId,
+            })}
             decorate={decorateInconsistencies}
             spellCheck
             />  
         </div>
         
       </Slate>
-          
-       {analysis && (
-        <div className="analysis-panel" style={{
-          minHeight: "200px",
-          maxHeight: "200px",
-          overflowY: "auto",
-        }}>
-          <h2>Extrahierte Fakten</h2>
-
-          {analysis.facts.map((fact, index) => (
-            <div key={index}>
-              <strong>{fact.subject}</strong>
-              {" → "}
-              <strong>{fact.predicate}</strong>
-              {" → "}
-              {fact.value !== undefined
-                ? String(fact.value)
-                : fact.object}
-            </div>
-          ))}
-        </div>
-      )}
-      {
-      inconsistencies.length > 0 && (
-        <div className="analysis-inconsistencies" style={{minHeight: '100px',maxHeight:'100px', overflowY:'auto'}}>
-          <h2>Inkonsistenzen</h2>
-
-          {inconsistencies.map((inconsistency, index) => (
-            <div key={index}>
-              <p>
-                <strong>{inconsistency.message}</strong>
-              </p>
-
-              <pre>
-                {JSON.stringify(
-                  inconsistency.facts,
-                  null,
-                  2
-                )}
-              </pre>
-            </div>
-          ))}
-        </div>
-      )} 
-      {analysis && inconsistencies.length === 0 && (
-        
-        <div>
-          <h2>Keine Inkonsistenzen gefunden</h2>
-        </div>
-      )}
     </div>
+    <aside className="conflict-list" aria-label="Gefundene Inkonsistenzen">
+      <h2>Inconsistencies</h2>
+      {inconsistencies.length === 0 ? (
+        <p className="conflict-list-empty">
+          No Inconsistencies found.
+        </p>
+      ) : (
+        inconsistencies.map((inconsistency, index) => {
+          const severity = inconsistency.severity ?? "medium";
+
+          return (
+            <button
+              key={index}
+              type="button"
+              className={`conflict-card conflict-card--${severity}`}
+              onClick={() => focusInconsistency(index)}
+            >
+              <span className="conflict-card-severity">{severity}</span>
+              <span className="conflict-card-message">
+                {inconsistency.message}
+              </span>
+            </button>
+          );
+        })
+      )}
+    </aside>
   </div>   
   );
 }
@@ -954,6 +1068,8 @@ function renderLeaf({
   attributes,
   children,
   leaf,
+  activeInconsistencyId,
+  onConflictHoverChange,
 }: any) {
   if (leaf.bold) {
     children = <strong>{children}</strong>;
@@ -969,13 +1085,44 @@ function renderLeaf({
 
   return (
     <span
+      style={
+        leaf.inconsistencyRole === "conflict" && leaf.replayVersion
+          ? {
+              animationName:
+                leaf.replayVersion % 2 === 0
+                  ? "inconsistency-jitter-replay-a"
+                  : "inconsistency-jitter-replay-b",
+              animationDelay: "0ms",
+            }
+          : undefined
+      }
       {...attributes}
       className={
         leaf.inconsistencyRole === "conflict"
-          ? "inconsistent-text"
+          ? [
+              "inconsistent-text",
+              `inconsistent-text--${
+                leaf.inconsistencySeverity ?? "medium"
+              }`,
+            ].join(" ")
           : leaf.inconsistencyRole === "context"
-            ? "inconsistency-context"
+            ? [
+                "inconsistency-context",
+                leaf.inconsistencyIds?.includes(activeInconsistencyId)
+                  ? "inconsistency-context--active"
+                  : "",
+              ].filter(Boolean).join(" ")
             : undefined
+      }
+      onMouseEnter={
+        leaf.inconsistencyRole === "conflict"
+          ? () => onConflictHoverChange(leaf.inconsistencyIds?.[0] ?? null)
+          : undefined
+      }
+      onMouseLeave={
+        leaf.inconsistencyRole === "conflict"
+          ? () => onConflictHoverChange(null)
+          : undefined
       }
     >
       {children}
