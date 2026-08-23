@@ -1,16 +1,22 @@
 import { useMemo } from "react";
 import { Node, type Descendant,Element as SlateElement } from "slate";
+import type { InconsistencySeverity } from "../../ai/consistencyChecker";
 import './../../assets/css/editorNav.css';
 
 type NavigationSegment = {
   path: number[];
   characterCount: number;
-  hasInconsistency: boolean;
+  inconsistencySeverity?: InconsistencySeverity;
+};
+
+export type InconsistentPath = {
+  path: number[];
+  severity: InconsistencySeverity;
 };
 
 type EditorNavigationProps = {
   document: Descendant[];
-  inconsistentPaths: number[][];
+  inconsistentPaths: InconsistentPath[];
   onNavigate: (path: number[]) => void;
 };
 
@@ -34,11 +40,11 @@ function getNodeText(node: Descendant): string {
 
 function createNavigationSegments(
   document: Descendant[],
-  inconsistentPaths: number[][]
+  inconsistentPaths: InconsistentPath[]
 ): NavigationSegment[] {
-  const inconsistentPathSet = new Set(
-    inconsistentPaths.map((path) =>
-      path.join(".")
+  const inconsistentPathSeverities = new Map(
+    inconsistentPaths.map(({ path, severity }) =>
+      [path.join("."), severity]
     )
   );
 
@@ -62,7 +68,7 @@ function createNavigationSegments(
     items.push({
       path,
       characterCount: text.length,
-      hasInconsistency: inconsistentPathSet.has(
+      inconsistencySeverity: inconsistentPathSeverities.get(
         path.join(".")
       ),
     });
@@ -104,8 +110,8 @@ export default function EditorNavigation({
               type="button"
               className={[
                 "editor-navigation-segment",
-                item.hasInconsistency
-                  ? "has-inconsistency"
+                item.inconsistencySeverity
+                  ? `has-inconsistency has-inconsistency--${item.inconsistencySeverity}`
                   : "",
               ]
                 .filter(Boolean)

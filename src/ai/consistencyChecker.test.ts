@@ -2948,6 +2948,7 @@ it("currently treats a shared ancestor as compatible even when temporal ranges d
   expect(checkConsistency(extraction)).toEqual([
     {
       type: "conflicting_fact",
+      category: "exclusive_fact",
       subject: "anna",
       predicate: "located_in",
       facts: [
@@ -2955,11 +2956,11 @@ it("currently treats a shared ancestor as compatible even when temporal ranges d
         extraction.facts[3],
       ],
       message:
-        'anna hat widersprüchliche Angaben für "located_in".',
+        'anna has conflicting information for "located_in".',
       severity: "medium",
       impact: "world",
       impactDescription:
-        "Der räumliche Kontext der Geschichte ist widersprüchlich. Ortswechsel und die Logik der Welt sollten überprüft werden.",
+        "The story's spatial context is contradictory. Location changes and the logic of the world should be reviewed.",
     },
   ]);
 });
