@@ -718,6 +718,15 @@ function deserialize(
         foundInconsistencies
       );
 
+      console.log(
+        "Inconsistencies with editor paths:",
+        foundInconsistencies.map((inconsistency, index) => ({
+          index,
+          inconsistency,
+          paths: getInconsistentPaths(editor, [inconsistency]),
+        }))
+      );
+
       setInconsistentPaths(paths);
       setInconsistentRanges(
         getInconsistentTextRanges(editor, foundInconsistencies)
