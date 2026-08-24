@@ -48,6 +48,11 @@
   background: #6f7ba8;
 }
 
+.toolbar .analyze-text-button {
+  margin-left: auto;
+  color: #252b45;
+}
+
 .toolbar .uploadDiv .fileUploadBtn{
   cursor: pointer;
   height: 38px;
@@ -436,10 +441,11 @@
   border-radius: 8px;
   background: #fff;
   overflow-y: auto;
+  overflow-x: hidden;
   flex-shrink: 0;
 }
 
-.conflict-list h2 {
+.conflict-list-header {
   position: sticky;
   top: 0;
   z-index: 5;
@@ -450,8 +456,38 @@
   border-radius: 6px 6px 0 0;
   background: #97a0c3;
   color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.conflict-list-header h2 {
+  margin: 0;
   font-size: 20px;
   font-weight: 700;
+}
+
+.resolve-all-button {
+  padding: 5px 9px;
+  border: 1px solid #3f496f;
+  border-radius: 6px;
+  background: #fefefe;
+  color: #252b45;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.resolve-all-button:hover:not(:disabled),
+.resolve-all-button:focus-visible {
+  background: #e7eaf4;
+}
+
+.resolve-all-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .conflict-list-empty {
@@ -461,6 +497,7 @@
 
 .conflict-card {
   width: calc(100% - 32px);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -470,13 +507,45 @@
   border-radius: 6px;
   color: #3f1010;
   text-align: left;
-  cursor: pointer;
 }
 
 .conflict-card:hover,
-.conflict-card:focus-visible {
+.conflict-card:focus-within {
   outline: 2px solid #3f496f;
   outline-offset: 2px;
+}
+
+.conflict-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resolve-inconsistency-button {
+  align-self: flex-end;
+  margin-top: 4px;
+  padding: 5px 9px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 75%);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.resolve-inconsistency-button:hover,
+.resolve-inconsistency-button:focus-visible {
+  background: #fff;
 }
 
 .conflict-card--selected {

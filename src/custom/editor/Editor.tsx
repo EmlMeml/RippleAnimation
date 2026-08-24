@@ -1265,6 +1265,36 @@ function deserialize(
     }
   }
 
+  function handleResolveAll() {
+    setInconsistencies([]);
+    setInconsistentPaths([]);
+    setInconsistentRanges([]);
+    setActiveInconsistencyId(null);
+    setSelectedInconsistencyId(null);
+    setJitterSuppressedIds(new Set());
+    setOffscreenAbove([]);
+    setOffscreenBelow([]);
+    setOffscreenFactPreviews([]);
+  }
+
+  function handleResolve(indexToResolve: number) {
+    const remainingInconsistencies = inconsistencies.filter(
+      (_, index) => index !== indexToResolve
+    );
+
+    setInconsistencies(remainingInconsistencies);
+    setInconsistentPaths(getInconsistentPaths(editor, remainingInconsistencies));
+    setInconsistentRanges(
+      getInconsistentTextRanges(editor, remainingInconsistencies)
+    );
+    setActiveInconsistencyId(null);
+    setSelectedInconsistencyId(null);
+    setJitterSuppressedIds(new Set());
+    setOffscreenAbove([]);
+    setOffscreenBelow([]);
+    setOffscreenFactPreviews([]);
+  }
+
   const activeInconsistencyIndex = activeInconsistencyId
     ? Number(activeInconsistencyId.replace("inconsistency-", ""))
     : -1;
@@ -1432,7 +1462,17 @@ function deserialize(
       </Slate>
     </div>
     <aside className="conflict-list" aria-label="Found inconsistencies">
-      <h2>Inconsistencies</h2>
+      <div className="conflict-list-header">
+        <h2>Inconsistencies</h2>
+        <button
+          type="button"
+          className="resolve-all-button"
+          onClick={handleResolveAll}
+          disabled={inconsistencies.length === 0}
+        >
+          Resolve all
+        </button>
+      </div>
       {inconsistencies.length === 0 ? (
         <p className="conflict-list-empty">
           No Inconsistencies found.
@@ -1445,9 +1485,8 @@ function deserialize(
           const presentationLabel = `${factTheme.label} · ${category.label}`;
 
           return (
-            <button
+            <div
               key={index}
-              type="button"
               className={[
                 "conflict-card",
                 `conflict-card--${severity}`,
@@ -1455,44 +1494,56 @@ function deserialize(
                   ? "conflict-card--selected"
                   : "",
               ].filter(Boolean).join(" ")}
-              onClick={() => focusInconsistency(index)}
-              aria-pressed={selectedInconsistencyId === `inconsistency-${index}`}
               onMouseEnter={() => handleInconsistencyHover(`inconsistency-${index}`)}
               onMouseLeave={() => handleInconsistencyHover(null)}
             >
-              <span
-                className="conflict-card-category-emoji"
-                role="img"
-                aria-label={presentationLabel}
-                title={presentationLabel}
+              <button
+                type="button"
+                className="conflict-card-content"
+                onClick={() => focusInconsistency(index)}
+                aria-pressed={selectedInconsistencyId === `inconsistency-${index}`}
               >
-                {factTheme.emoji}
-              </span>
-              <span className="conflict-card-category-label">
-                {factTheme.label} · {category.label}
-              </span>
-              <span className="conflict-card-severity">{severity}</span>
-              <span className="conflict-card-message">
-                {inconsistency.message}
-              </span>
-              <span className="conflict-card-facts">
-                {inconsistency.facts.map((fact, factIndex) => {
-                  const label = inconsistency.facts.length === 1
-                    ? "Statement"
-                    : factIndex === 0
-                      ? "Earlier"
-                      : factIndex === inconsistency.facts.length - 1
-                        ? "Later"
-                        : "Related";
+                <span
+                  className="conflict-card-category-emoji"
+                  role="img"
+                  aria-label={presentationLabel}
+                  title={presentationLabel}
+                >
+                  {factTheme.emoji}
+                </span>
+                <span className="conflict-card-category-label">
+                  {factTheme.label} · {category.label}
+                </span>
+                <span className="conflict-card-severity">{severity}</span>
+                <span className="conflict-card-message">
+                  {inconsistency.message}
+                </span>
+                <span className="conflict-card-facts">
+                  {inconsistency.facts.map((fact, factIndex) => {
+                    const label = inconsistency.facts.length === 1
+                      ? "Statement"
+                      : factIndex === 0
+                        ? "Earlier"
+                        : factIndex === inconsistency.facts.length - 1
+                          ? "Later"
+                          : "Related";
 
-                  return (
-                    <span key={`${fact.predicate}-${factIndex}`} className="conflict-card-fact">
-                      <strong>{label}:</strong> {formatFactStatement(fact)}
-                    </span>
-                  );
-                })}
-              </span>
-            </button>
+                    return (
+                      <span key={`${fact.predicate}-${factIndex}`} className="conflict-card-fact">
+                        <strong>{label}:</strong> {formatFactStatement(fact)}
+                      </span>
+                    );
+                  })}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="resolve-inconsistency-button"
+                onClick={() => handleResolve(index)}
+              >
+                Resolved
+              </button>
+            </div>
           );
         })
       )}
@@ -1572,13 +1623,13 @@ function Toolbar({
         Example Text
       </button>
       <button
-      type="button"
-      style={{color:'#252b45'}}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        onAnalyze();
-      }}
-      disabled={analyzing}
+        type="button"
+        className="analyze-text-button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onAnalyze();
+        }}
+        disabled={analyzing}
       >
         {analyzing ? "Analyzing..." : "Analyze Text"}
       </button>
