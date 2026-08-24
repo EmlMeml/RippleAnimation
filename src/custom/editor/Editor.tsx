@@ -64,10 +64,12 @@ type HeadingElement = {
 type MarkFormat = Exclude<keyof CustomText, "text" | "inconsistent">;
 type InconsistentTextRange = BaseRange & {
   inconsistent: true;
-  inconsistencyRole: "conflict" | "context";
+  inconsistencyRole: "conflict" | "context" | "sentence";
   inconsistencySeverity?: InconsistencySeverity;
   inconsistencyIds: string[];
   conflictInconsistencyIds: string[];
+  previewInconsistencyIds?: string[];
+  sentenceInconsistencyIds?: string[];
   replayVersion?: number;
 };
 
@@ -175,10 +177,12 @@ declare module "slate" {
     Text: CustomText;
     Range: BaseRange & {
       inconsistent?: boolean;
-      inconsistencyRole?: "conflict" | "context";
+      inconsistencyRole?: "conflict" | "context" | "sentence";
       inconsistencySeverity?: InconsistencySeverity;
       inconsistencyIds?: string[];
       conflictInconsistencyIds?: string[];
+      previewInconsistencyIds?: string[];
+      sentenceInconsistencyIds?: string[];
       replayVersion?: number;
     };
   }
@@ -301,17 +305,35 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           undefined
         );
 
+        const contextRanges = coveringRanges.filter(
+          (range) => range.inconsistencyRole === "context"
+        );
+        const sentenceRanges = coveringRanges.filter(
+          (range) => range.inconsistencyRole === "sentence"
+        );
+
         segments.push({
           anchor: { path, offset: start },
           focus: { path, offset: end },
           inconsistent: true,
-          inconsistencyRole: conflictRanges.length > 0 ? "conflict" : "context",
+          inconsistencyRole:
+            conflictRanges.length > 0
+              ? "conflict"
+              : contextRanges.length > 0
+                ? "context"
+                : "sentence",
           inconsistencySeverity: severity,
           inconsistencyIds: Array.from(new Set(
             coveringRanges.flatMap((range) => range.inconsistencyIds)
           )),
           conflictInconsistencyIds: Array.from(new Set(
             conflictRanges.flatMap((range) => range.conflictInconsistencyIds)
+          )),
+          previewInconsistencyIds: Array.from(new Set(
+            contextRanges.flatMap((range) => range.inconsistencyIds)
+          )),
+          sentenceInconsistencyIds: Array.from(new Set(
+            sentenceRanges.flatMap((range) => range.inconsistencyIds)
           )),
           replayVersion: Math.max(
             0,
@@ -543,10 +565,12 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     const viewport = scrollContainer.getBoundingClientRect();
     const contextElements = Array.from(
-      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
+      scrollContainer.querySelectorAll<HTMLElement>("[data-preview-inconsistency-ids]")
     ).filter((element) =>
-      element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId) &&
-      !element.dataset.conflictInconsistencyIds?.split(" ").includes(activeInconsistencyId)
+      element.dataset.inconsistencyRole === "context" &&
+      element.dataset.previewInconsistencyIds
+        ?.split(" ")
+        .includes(activeInconsistencyId)
     );
 
     const previews = contextElements.flatMap((element, index): OffscreenFactPreview[] => {
@@ -899,6 +923,28 @@ function getFactHighlightPattern(
   return new RegExp(`\\b${escapeForRegExp(String(value))}\\b`, "gi");
 }
 
+function getSentenceOffsets(text: string, matchStart: number, matchEnd: number) {
+  const sentenceBoundary = /[.!?]/;
+  let start = matchStart;
+  let end = matchEnd;
+
+  while (start > 0 && !sentenceBoundary.test(text[start - 1])) {
+    start -= 1;
+  }
+  while (start < matchStart && /\s/.test(text[start])) {
+    start += 1;
+  }
+
+  while (end < text.length && !sentenceBoundary.test(text[end])) {
+    end += 1;
+  }
+  if (end < text.length) {
+    end += 1;
+  }
+
+  return { start, end };
+}
+
 function getInconsistentTextRanges(
   editor: Editor,
   inconsistencies: Inconsistency[]
@@ -941,8 +987,32 @@ function getInconsistentTextRanges(
 
           const anchor = { path, offset: match.index };
           const focus = { path, offset: match.index + match[0].length };
+          const sentenceOffsets = getSentenceOffsets(
+            node.text,
+            match.index,
+            match.index + match[0].length
+          );
+          const hasSentenceRange = ranges.some((range) =>
+            range.inconsistencyRole === "sentence" &&
+            range.inconsistencyIds.includes(inconsistencyId) &&
+            Path.equals(range.anchor.path, path) &&
+            range.anchor.offset === sentenceOffsets.start &&
+            range.focus.offset === sentenceOffsets.end
+          );
+
+          if (!hasSentenceRange) {
+            ranges.push({
+              anchor: { path, offset: sentenceOffsets.start },
+              focus: { path, offset: sentenceOffsets.end },
+              inconsistent: true,
+              inconsistencyRole: "sentence",
+              inconsistencyIds: [inconsistencyId],
+              conflictInconsistencyIds: [],
+            });
+          }
 
           const existingRange = ranges.find((range) =>
+            range.inconsistencyRole !== "sentence" &&
             Path.equals(range.anchor.path, anchor.path) &&
             range.anchor.offset === anchor.offset &&
             range.focus.offset === focus.offset
@@ -1814,9 +1884,20 @@ function renderLeaf({
   jitterSuppressedIds,
   onConflictHoverChange,
 }: any) {
+  const activeRoleInconsistencyIds =
+    leaf.inconsistencyRole === "conflict"
+      ? leaf.conflictInconsistencyIds
+      : leaf.inconsistencyRole === "context"
+        ? leaf.previewInconsistencyIds
+        : leaf.sentenceInconsistencyIds;
   const belongsToActiveScope =
     activeInconsistencyId !== null &&
-    leaf.inconsistencyIds?.includes(activeInconsistencyId);
+    activeRoleInconsistencyIds?.includes(activeInconsistencyId);
+  const belongsToActiveSentence =
+    activeInconsistencyId !== null &&
+    leaf.sentenceInconsistencyIds?.includes(activeInconsistencyId);
+  const renderAsActiveSentence =
+    belongsToActiveSentence && !belongsToActiveScope;
   const suppressJitter = leaf.inconsistencyIds?.some(
     (id: string) => jitterSuppressedIds.has(id)
   );
@@ -1849,6 +1930,13 @@ function renderLeaf({
           : undefined
       }
       {...attributes}
+      data-inconsistency-role={leaf.inconsistencyRole}
+      data-preview-inconsistency-ids={
+        leaf.previewInconsistencyIds?.join(" ") || undefined
+      }
+      data-sentence-inconsistency-ids={
+        leaf.sentenceInconsistencyIds?.join(" ") || undefined
+      }
       data-inconsistency-ids={
         leaf.inconsistencyRole
           ? leaf.inconsistencyIds?.join(" ")
@@ -1860,7 +1948,12 @@ function renderLeaf({
           : undefined
       }
       className={
-        leaf.inconsistencyRole === "conflict"
+        renderAsActiveSentence
+          ? [
+              "inconsistency-sentence",
+              "inconsistency-sentence--active",
+            ].join(" ")
+          : leaf.inconsistencyRole === "conflict"
           ? [
               "inconsistent-text",
               `inconsistent-text--${
@@ -1885,11 +1978,20 @@ function renderLeaf({
                   : "",
                 belongsToActiveScope ? "inconsistency-scope-active--context" : "",
               ].filter(Boolean).join(" ")
-            : undefined
+            : leaf.inconsistencyRole === "sentence"
+              ? [
+                  "inconsistency-sentence",
+                  belongsToActiveScope
+                    ? "inconsistency-sentence--active"
+                    : "",
+                ].filter(Boolean).join(" ")
+              : undefined
       }
       onMouseEnter={
         leaf.inconsistencyRole === "conflict"
-          ? () => onConflictHoverChange(leaf.inconsistencyIds?.[0] ?? null)
+          ? () => onConflictHoverChange(
+              leaf.conflictInconsistencyIds?.[0] ?? null
+            )
           : undefined
       }
       onMouseLeave={

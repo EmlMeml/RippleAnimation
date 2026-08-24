@@ -144,6 +144,17 @@
   outline: 1px dashed #ef4444;
 }
 
+.editor .inconsistency-sentence {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 200ms ease;
+}
+
+.editor.editor--scope-active .inconsistency-sentence--active[data-slate-leaf] {
+  background-color: #fff7ed;
+  opacity: 1;
+}
+
 .editor--scope-active [data-slate-leaf] {
   opacity: 0.72;
   transition: opacity 180ms ease;
