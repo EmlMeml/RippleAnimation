@@ -28,6 +28,24 @@ describe("checkConsistency", () => {
     expect(result[0].type).toBe("conflicting_fact");
   });
 
+  it("bündelt mehrere widersprüchliche Werte und bewahrt alle Textvorkommen", () => {
+    const extraction: FactExtraction = {
+      entities: [],
+      facts: [
+        { subject: "Alice", predicate: "occupation", value: "teacher", source: { paragraphIndex: 0 } },
+        { subject: "Alice", predicate: "occupation", value: "technician", source: { paragraphIndex: 2 } },
+        { subject: "Alice", predicate: "occupation", value: "nurse", source: { paragraphIndex: 3 } },
+        { subject: "Alice", predicate: "occupation", value: "nurse", source: { paragraphIndex: 5 } },
+      ],
+    };
+
+    const result = checkConsistency(extraction);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].facts).toEqual(extraction.facts);
+    expect(result[0].message).toContain("Teacher, Technician, and Nurse");
+  });
+
   it("erkennt Groß-/Kleinschreibung nicht als Widerspruch", () => {
     const extraction: FactExtraction = {
       entities: [],

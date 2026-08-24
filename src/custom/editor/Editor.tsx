@@ -43,6 +43,16 @@ type CustomText = {
   italic?: boolean;
   underline?: boolean;
   inconsistent?: boolean;
+  changeId?: string;
+  changeType?: "insertion" | "deletion";
+};
+
+type TrackedChange = {
+  id: string;
+  inconsistency: Inconsistency;
+  replacement: string;
+  replacedValues: string[];
+  occurrenceCount: number;
 };
 
 type LinkElement = {
@@ -246,6 +256,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     useState<OffscreenFactPreview[]>([]);
   const [factPreviewConnections, setFactPreviewConnections] =
     useState<FactPreviewConnection[]>([]);
+  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
+  const nextTrackedChangeId = useRef(0);
 
   const [, setAnalysis] =
     useState<FactExtraction | null>(null);
@@ -742,6 +754,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         focus: { path: [0, 0], offset: 0 },
       };
     });
+    setTrackedChanges([]);
     setDocument(nodes);
     editor.onChange();
   }  
@@ -1365,6 +1378,149 @@ function deserialize(
     setOffscreenFactPreviews([]);
   }
 
+  function handleSuggestChange(inconsistency: Inconsistency) {
+    if (inconsistency.category !== "exclusive_fact") {
+      return;
+    }
+
+    const orderedFacts = [...inconsistency.facts].sort(
+      (first, second) =>
+        (first.source?.paragraphIndex ?? Number.MAX_SAFE_INTEGER) -
+        (second.source?.paragraphIndex ?? Number.MAX_SAFE_INTEGER)
+    );
+    const baseFact = orderedFacts[0];
+    const baseValue = baseFact?.object ?? baseFact?.value;
+
+    if (baseValue === undefined || baseValue === null || baseValue === "") {
+      return;
+    }
+
+    const replacement = String(baseValue);
+    const targetFacts = orderedFacts.filter(
+      (fact) =>
+        normalizeSearchText(fact.object ?? fact.value) !==
+        normalizeSearchText(baseValue)
+    );
+    const ranges = new Map<string, BaseRange>();
+    const replacedValues = new Set<string>();
+
+    for (const fact of targetFacts) {
+      const paragraphIndex = getFactParagraphIndex(editor, fact);
+      const pattern = getFactHighlightPattern(fact);
+      if (paragraphIndex === null || !pattern) {
+        continue;
+      }
+
+      replacedValues.add(String(fact.object ?? fact.value));
+
+      for (const [node, path] of SlateNode.texts(editor)) {
+        if (path[0] !== paragraphIndex || node.changeType) {
+          continue;
+        }
+
+        for (const match of node.text.matchAll(pattern)) {
+          if (match.index === undefined || match[0].length === 0) {
+            continue;
+          }
+
+          const range = {
+            anchor: { path, offset: match.index },
+            focus: { path, offset: match.index + match[0].length },
+          };
+          ranges.set(
+            `${path.join(".")}:${range.anchor.offset}:${range.focus.offset}`,
+            range
+          );
+        }
+      }
+    }
+
+    const occurrences = Array.from(ranges.values()).sort((first, second) => {
+      const pathOrder = Path.compare(second.anchor.path, first.anchor.path);
+      return pathOrder !== 0
+        ? pathOrder
+        : second.anchor.offset - first.anchor.offset;
+    });
+
+    if (occurrences.length === 0) {
+      return;
+    }
+
+    const changeId = `tracked-change-${nextTrackedChangeId.current++}`;
+
+    Editor.withoutNormalizing(editor, () => {
+      for (const range of occurrences) {
+        const insertionPoint = Editor.pointRef(editor, range.focus, {
+          affinity: "forward",
+        });
+
+        Transforms.setNodes<CustomText>(
+          editor,
+          { changeId, changeType: "deletion" },
+          { at: range, match: Text.isText, split: true }
+        );
+
+        const point = insertionPoint.unref();
+        if (point) {
+          Transforms.insertNodes<CustomText>(
+            editor,
+            { text: replacement, changeId, changeType: "insertion" },
+            { at: point }
+          );
+        }
+      }
+    });
+
+    setTrackedChanges((changes) => [
+      ...changes,
+      {
+        id: changeId,
+        inconsistency,
+        replacement,
+        replacedValues: Array.from(replacedValues),
+        occurrenceCount: occurrences.length,
+      },
+    ]);
+    setDocument([...editor.children]);
+  }
+
+  function finishTrackedChange(change: TrackedChange, action: "accept" | "reject") {
+    const entries = Array.from(
+      Editor.nodes(editor, {
+        at: [],
+        match: (node) => Text.isText(node) && node.changeId === change.id,
+      })
+    ).sort(([, firstPath], [, secondPath]) => Path.compare(secondPath, firstPath));
+
+    Editor.withoutNormalizing(editor, () => {
+      for (const [node, path] of entries) {
+        if (!Text.isText(node)) {
+          continue;
+        }
+
+        const shouldRemove =
+          (action === "accept" && node.changeType === "deletion") ||
+          (action === "reject" && node.changeType === "insertion");
+
+        if (shouldRemove) {
+          Transforms.removeNodes(editor, { at: path });
+        } else {
+          Transforms.unsetNodes(editor, ["changeId", "changeType"], { at: path });
+        }
+      }
+    });
+
+    setTrackedChanges((changes) => changes.filter(({ id }) => id !== change.id));
+    setDocument([...editor.children]);
+
+    if (action === "accept") {
+      const currentIndex = inconsistencies.indexOf(change.inconsistency);
+      if (currentIndex >= 0) {
+        handleResolve(currentIndex);
+      }
+    }
+  }
+
   const activeInconsistencyIndex = activeInconsistencyId
     ? Number(activeInconsistencyId.replace("inconsistency-", ""))
     : -1;
@@ -1606,16 +1762,53 @@ function deserialize(
                   })}
                 </span>
               </button>
-              <button
-                type="button"
-                className="resolve-inconsistency-button"
-                onClick={() => handleResolve(index)}
-              >
-                Resolved
-              </button>
+              <div className="conflict-card-actions">
+                {inconsistency.category === "exclusive_fact" && (
+                  <button
+                    type="button"
+                    className="suggest-change-button"
+                    onClick={() => handleSuggestChange(inconsistency)}
+                    disabled={trackedChanges.some(
+                      (change) => change.inconsistency === inconsistency
+                    )}
+                  >
+                    Suggest change
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="resolve-inconsistency-button"
+                  onClick={() => handleResolve(index)}
+                >
+                  Resolved
+                </button>
+              </div>
             </div>
           );
         })
+      )}
+      {trackedChanges.length > 0 && (
+        <section className="tracked-changes-panel" aria-label="Tracked changes">
+          <h3>Tracked Changes</h3>
+          {trackedChanges.map((change) => (
+            <div key={change.id} className="tracked-change-card">
+              <p>
+                Replace {change.replacedValues.join(", ")} with {change.replacement}
+                {change.occurrenceCount > 1
+                  ? ` (${change.occurrenceCount} occurrences)`
+                  : ""}
+              </p>
+              <div className="tracked-change-actions">
+                <button type="button" onClick={() => finishTrackedChange(change, "accept")}>
+                  Accept
+                </button>
+                <button type="button" onClick={() => finishTrackedChange(change, "reject")}>
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
       )}
     </aside>
   </div>   
@@ -1911,6 +2104,12 @@ function renderLeaf({
 
   if (leaf.underline) {
     children = <u>{children}</u>;
+  }
+
+  if (leaf.changeType === "deletion") {
+    children = <del className="tracked-deletion">{children}</del>;
+  } else if (leaf.changeType === "insertion") {
+    children = <ins className="tracked-insertion">{children}</ins>;
   }
 
   return (

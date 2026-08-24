@@ -271,6 +271,14 @@ function possessive(name: string): string {
   return name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
+function formatValueList(values: string[]): string {
+  if (values.length <= 2) {
+    return values.join(" and ");
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
 function formatUserFacingMessage(inconsistency: Inconsistency): string {
   const subject = displayValue(inconsistency.subject);
   const values = Array.from(new Set(
@@ -311,6 +319,10 @@ function formatUserFacingMessage(inconsistency: Inconsistency): string {
 
   if (inconsistency.category === "inverse_relation") {
     return `${subject} is assigned mutually incompatible relationships involving ${firstValue}.`;
+  }
+
+  if (values.length > 2) {
+    return `${possessive(subject)} ${displayValue(inconsistency.predicate)} has conflicting values: ${formatValueList(values)}.`;
   }
 
   if (firstValue && secondValue) {
@@ -728,9 +740,7 @@ function checkExclusiveFacts(
       ).values()
     );
 
-    /*
-     * Nach Subjekt gruppieren.
-     */
+    /* Nach Subjekt gruppieren. */
     const grouped = new Map<
       string,
       Fact[]
@@ -752,12 +762,16 @@ function checkExclusiveFacts(
     }
 
     /*
-     * Facts desselben Subjekts miteinander vergleichen.
+     * Facts desselben Subjekts miteinander vergleichen. Konfliktpaare werden
+     * anschließend zu zusammenhängenden Gruppen verbunden. So bilden etwa
+     * teacher ↔ technician und teacher ↔ nurse nur eine Inkonsistenz.
      */
     for (const [
       subject,
       subjectFacts,
     ] of grouped) {
+      const conflictPairs: Array<[Fact, Fact]> = [];
+
       for (
         let i = 0;
         i < subjectFacts.length;
@@ -841,20 +855,72 @@ function checkExclusiveFacts(
             continue;
           }
 
-          inconsistencies.push({
-            type: "conflicting_fact",
-            category: "exclusive_fact",
-            subject,
-            predicate,
-            facts: [
-              factA,
-              factB,
-            ],
-            message:
-              `${subject} has conflicting information for ` +
-              `"${predicate}".`,
-          });
+          conflictPairs.push([factA, factB]);
         }
+      }
+
+      const adjacency = new Map<string, Set<string>>();
+      const factsByKey = new Map(subjectFacts.map((fact) => [getFactKey(fact), fact]));
+
+      for (const [factA, factB] of conflictPairs) {
+        const keyA = getFactKey(factA);
+        const keyB = getFactKey(factB);
+        const neighborsA = adjacency.get(keyA) ?? new Set<string>();
+        const neighborsB = adjacency.get(keyB) ?? new Set<string>();
+        neighborsA.add(keyB);
+        neighborsB.add(keyA);
+        adjacency.set(keyA, neighborsA);
+        adjacency.set(keyB, neighborsB);
+      }
+
+      const visited = new Set<string>();
+
+      for (const startKey of adjacency.keys()) {
+        if (visited.has(startKey)) {
+          continue;
+        }
+
+        const componentKeys = new Set<string>();
+        const pending = [startKey];
+
+        while (pending.length > 0) {
+          const currentKey = pending.pop()!;
+          if (visited.has(currentKey)) {
+            continue;
+          }
+
+          visited.add(currentKey);
+          componentKeys.add(currentKey);
+          pending.push(...(adjacency.get(currentKey) ?? []));
+        }
+
+        const componentFacts = extraction.facts.filter(
+          (fact) =>
+            fact.predicate === predicate &&
+            normalizeValue(fact.subject) === subject &&
+            componentKeys.has(getFactKey(fact))
+        );
+
+        if (componentFacts.length < 2) {
+          continue;
+        }
+
+        /* factsByKey stellt sicher, dass jede Komponente echte Konfliktwerte
+         * enthält; componentFacts bewahrt zusätzlich alle Textvorkommen. */
+        if (Array.from(componentKeys).some((key) => !factsByKey.has(key))) {
+          continue;
+        }
+
+        inconsistencies.push({
+          type: "conflicting_fact",
+          category: "exclusive_fact",
+          subject,
+          predicate,
+          facts: componentFacts,
+          message:
+            `${subject} has conflicting information for ` +
+            `"${predicate}".`,
+        });
       }
     }
   }
