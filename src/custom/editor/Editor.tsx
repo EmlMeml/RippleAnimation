@@ -53,6 +53,8 @@ type TrackedChange = {
   replacement: string;
   replacedValues: string[];
   occurrenceCount: number;
+  rewritesEntireSentence: boolean;
+  paragraphIndices: number[];
 };
 
 type LinkElement = {
@@ -105,6 +107,31 @@ type FactPreviewConnection = {
   key: string;
   path: string;
 };
+
+type SentenceRewriteCandidate = {
+  key: string;
+  text: string;
+  range: BaseRange;
+};
+
+type SentenceSuggestionPreview = BaseRange & {
+  suggestionPreview: true;
+  replayVersion: number;
+};
+
+const stableInconsistencyIds = new WeakMap<Inconsistency, string>();
+let nextStableInconsistencyId = 0;
+
+function getStableInconsistencyId(inconsistency: Inconsistency): string {
+  const existingId = stableInconsistencyIds.get(inconsistency);
+  if (existingId) {
+    return existingId;
+  }
+
+  const id = `inconsistency-${nextStableInconsistencyId++}`;
+  stableInconsistencyIds.set(inconsistency, id);
+  return id;
+}
 
 const INCONSISTENCY_CATEGORY_PRESENTATION: Record<
   InconsistencyCategory,
@@ -193,6 +220,7 @@ declare module "slate" {
       conflictInconsistencyIds?: string[];
       previewInconsistencyIds?: string[];
       sentenceInconsistencyIds?: string[];
+      suggestionPreview?: boolean;
       replayVersion?: number;
     };
   }
@@ -237,10 +265,14 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
   const [inconsistentPaths, setInconsistentPaths] = useState<InconsistentPath[]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
+  const [hiddenInconsistencyIds, setHiddenInconsistencyIds] =
+    useState<Set<string>>(() => new Set());
   const [activeInconsistencyId, setActiveInconsistencyId] =
     useState<string | null>(null);
   const [selectedInconsistencyId, setSelectedInconsistencyId] =
     useState<string | null>(null);
+  const selectedInconsistencyIdRef = useRef<string | null>(null);
+  selectedInconsistencyIdRef.current = selectedInconsistencyId;
   const [jitterSuppressedIds, setJitterSuppressedIds] =
     useState<Set<string>>(() => new Set());
   const animationReplayVersion = useRef(0);
@@ -258,8 +290,16 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     useState<FactPreviewConnection[]>([]);
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
   const nextTrackedChangeId = useRef(0);
+  const [suggestionTarget, setSuggestionTarget] =
+    useState<Inconsistency | null>(null);
+  const [suggestionDraft, setSuggestionDraft] = useState("");
+  const [rewriteEntireSentence, setRewriteEntireSentence] = useState(false);
+  const [sentenceRewriteTarget, setSentenceRewriteTarget] = useState("");
+  const [sentenceSuggestionPreview, setSentenceSuggestionPreview] =
+    useState<SentenceSuggestionPreview | null>(null);
+  const sentenceSuggestionReplayVersion = useRef(0);
 
-  const [, setAnalysis] =
+  const [analysis, setAnalysis] =
     useState<FactExtraction | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -267,6 +307,151 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [, setAnalysisError] = useState("");
 
   const [document, setDocument] = useState<Descendant[]>(initialValue);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
+  const [pageLineWidths, setPageLineWidths] = useState<number[][]>([[]]);
+  const [pageLineTops, setPageLineTops] = useState<number[][]>([[]]);
+  const [blockPageIndices, setBlockPageIndices] = useState<number[]>([0]);
+  const [inconsistencyPageIndices, setInconsistencyPageIndices] = useState<number[]>([]);
+  const [inconsistencyPositions, setInconsistencyPositions] = useState<Array<{ page: number; x: number; y: number }>>([]);
+
+  const updatePagination = useCallback(() => {
+    const container = editorScrollRef.current;
+    if (!container) return;
+    const editable = container.firstElementChild as HTMLElement | null;
+    editable?.style.setProperty("--editor-page-height", `${container.clientHeight}px`);
+    const count = Math.max(1, Math.ceil(container.scrollHeight / container.clientHeight));
+    setPageCount(count);
+    setCurrentPage(Math.min(count - 1, Math.max(0, Math.round(container.scrollTop / Math.max(1, container.clientHeight)))));
+  }, []);
+
+  const navigateToPage = useCallback((page: number) => {
+    const container = editorScrollRef.current;
+    if (!container) return;
+    const target = Math.min(pageCount - 1, Math.max(0, page));
+    container.scrollTo({ top: target * container.clientHeight, behavior: "smooth" });
+    setCurrentPage(target);
+  }, [pageCount]);
+
+  const layoutParagraphsAcrossPages = useCallback(() => {
+    const container = editorScrollRef.current;
+    const editable = container?.firstElementChild as HTMLElement | null;
+    if (!container || !editable || container.clientHeight === 0) return;
+
+    const pageHeight = container.clientHeight;
+    editable.style.setProperty("--editor-page-height", `${pageHeight}px`);
+    const blocks = Array.from(
+      editable.querySelectorAll<HTMLElement>(":scope > [data-slate-node='element']")
+    );
+
+    // Erst den natürlichen Textfluss wiederherstellen, damit die Messung nicht
+    // auf Abständen einer früheren Fenster- oder Textgröße basiert.
+    blocks.forEach((block) => block.style.removeProperty("padding-top"));
+
+    for (const block of blocks) {
+      const top = block.offsetTop;
+      const height = block.offsetHeight;
+      const pageEnd = (Math.floor(top / pageHeight) + 1) * pageHeight;
+      const crossesPageEnd = top + height > pageEnd;
+      const fitsOnOnePage = height <= pageHeight - 116;
+
+      if (crossesPageEnd && fitsOnOnePage) {
+        // Etwas Abstand nach der sichtbaren Papierkante lässt den neuen Absatz
+        // wie auf einer echten Folgeseite beginnen.
+        block.style.paddingTop = `${pageEnd - top + 24}px`;
+      }
+    }
+
+    const measuredBlockPages = blocks.map((block) => {
+      const paddingTop = Number.parseFloat(block.style.paddingTop || "0") || 0;
+      return Math.max(0, Math.floor((block.offsetTop + paddingTop) / pageHeight));
+    });
+    setBlockPageIndices((current) =>
+      current.length === measuredBlockPages.length &&
+      current.every((page, index) => page === measuredBlockPages[index])
+        ? current
+        : measuredBlockPages
+    );
+
+    const editableRect = editable.getBoundingClientRect();
+    const measuredInconsistencyPositions = inconsistencies.map((inconsistency) => {
+      const id = getStableInconsistencyId(inconsistency);
+      const marker = editable.querySelector<HTMLElement>(
+        `[data-conflict-inconsistency-ids~="${id}"]`
+      );
+      if (!marker) return { page: 0, x: 50, y: 8 };
+      const rect = marker.getBoundingClientRect();
+      const relativeTop = rect.top + rect.height / 2 - editableRect.top;
+      return {
+        page: Math.max(0, Math.floor(relativeTop / pageHeight)),
+        x: Math.min(92, Math.max(8, ((rect.left + rect.width / 2 - editableRect.left) / editableRect.width) * 100)),
+        y: Math.min(92, Math.max(8, ((relativeTop % pageHeight) / pageHeight) * 100)),
+      };
+    });
+    setInconsistencyPositions((current) =>
+      JSON.stringify(current) === JSON.stringify(measuredInconsistencyPositions)
+        ? current
+        : measuredInconsistencyPositions
+    );
+    const measuredInconsistencyPages = measuredInconsistencyPositions.map(({ page }) => page);
+    setInconsistencyPageIndices((current) =>
+      current.length === measuredInconsistencyPages.length &&
+      current.every((page, index) => page === measuredInconsistencyPages[index])
+        ? current
+        : measuredInconsistencyPages
+    );
+    const contentWidth = Math.max(1, editable.clientWidth - 124);
+    const visualLines = new Map<number, { left: number; right: number; top: number }>();
+    const walker = window.document.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+    let textNode = walker.nextNode();
+
+    while (textNode) {
+      if (textNode.textContent?.trim()) {
+        const range = window.document.createRange();
+        range.selectNodeContents(textNode);
+        for (const rect of Array.from(range.getClientRects())) {
+          if (rect.width === 0 || rect.height === 0) continue;
+          const relativeTop = rect.top - editableRect.top;
+          const lineKey = Math.round(relativeTop / 2) * 2;
+          const existing = visualLines.get(lineKey);
+          visualLines.set(lineKey, existing ? {
+            left: Math.min(existing.left, rect.left),
+            right: Math.max(existing.right, rect.right),
+            top: Math.min(existing.top, relativeTop),
+          } : { left: rect.left, right: rect.right, top: relativeTop });
+        }
+      }
+      textNode = walker.nextNode();
+    }
+
+    const measuredPageCount = Math.max(1, Math.ceil(editable.scrollHeight / pageHeight));
+    const measuredLines = Array.from({ length: measuredPageCount }, () => [] as number[]);
+    const measuredLineTops = Array.from({ length: measuredPageCount }, () => [] as number[]);
+    Array.from(visualLines.values())
+      .sort((a, b) => a.top - b.top)
+      .forEach((line) => {
+        const page = Math.min(measuredPageCount - 1, Math.max(0, Math.floor(line.top / pageHeight)));
+        measuredLines[page].push(Math.min(100, Math.max(8, ((line.right - line.left) / contentWidth) * 100)));
+        measuredLineTops[page].push(((line.top % pageHeight) / pageHeight) * 100);
+      });
+    setPageLineWidths((current) =>
+      JSON.stringify(current) === JSON.stringify(measuredLines) ? current : measuredLines
+    );
+    setPageLineTops((current) =>
+      JSON.stringify(current) === JSON.stringify(measuredLineTops) ? current : measuredLineTops
+    );
+
+    requestAnimationFrame(updatePagination);
+  }, [inconsistencies, updatePagination]);
+
+  useEffect(() => {
+    const container = editorScrollRef.current;
+    if (!container) return;
+    const frame = requestAnimationFrame(layoutParagraphsAcrossPages);
+    const observer = new ResizeObserver(layoutParagraphsAcrossPages);
+    observer.observe(container);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [document, layoutParagraphsAcrossPages]);
 
   const decorateInconsistencies = useCallback(
     ([node, path]: NodeEntry): DecoratedRange[] => {
@@ -354,16 +539,28 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         });
       }
 
+      if (
+        sentenceSuggestionPreview &&
+        Path.equals(sentenceSuggestionPreview.anchor.path, path)
+      ) {
+        return [...segments, sentenceSuggestionPreview];
+      }
+
       return segments;
     },
-    [inconsistentRanges]
+    [inconsistentRanges, sentenceSuggestionPreview]
   );
 
   function focusInconsistency(index: number) {
-    const inconsistencyId = `inconsistency-${index}`;
+    const inconsistency = inconsistencies[index];
+    if (!inconsistency) {
+      return;
+    }
+    const inconsistencyId = getStableInconsistencyId(inconsistency);
 
     if (selectedInconsistencyId === inconsistencyId) {
       setSelectedInconsistencyId(null);
+      selectedInconsistencyIdRef.current = null;
       setActiveInconsistencyId(null);
       return;
     }
@@ -378,6 +575,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     setActiveInconsistencyId(inconsistencyId);
     setSelectedInconsistencyId(inconsistencyId);
+    selectedInconsistencyIdRef.current = inconsistencyId;
     animationReplayVersion.current += 1;
     const replayVersion = animationReplayVersion.current;
 
@@ -425,7 +623,9 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       });
     }
 
-    setActiveInconsistencyId(inconsistencyId ?? selectedInconsistencyId);
+    setActiveInconsistencyId(
+      inconsistencyId ?? selectedInconsistencyIdRef.current
+    );
   }
 
   const updateOffscreenMarkers = useCallback(() => {
@@ -437,7 +637,10 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     const viewport = scrollContainer.getBoundingClientRect();
     const positions = inconsistencies.map((inconsistency, index) => {
-      const id = `inconsistency-${index}`;
+      const id = getStableInconsistencyId(inconsistency);
+      if (hiddenInconsistencyIds.has(id)) {
+        return null;
+      }
       const elements = Array.from(
         scrollContainer.querySelectorAll<HTMLElement>("[data-conflict-inconsistency-ids]")
       ).filter((element) =>
@@ -547,7 +750,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     setOffscreenAbove(markersFor("above"));
     setOffscreenBelow(markersFor("below"));
-  }, [inconsistencies]);
+  }, [inconsistencies, hiddenInconsistencyIds]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -570,7 +773,11 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const updateOffscreenFactPreviews = useCallback(() => {
     const scrollContainer = editorScrollRef.current;
 
-    if (!scrollContainer || !activeInconsistencyId) {
+    if (
+      !scrollContainer ||
+      !activeInconsistencyId ||
+      hiddenInconsistencyIds.has(activeInconsistencyId)
+    ) {
       setOffscreenFactPreviews([]);
       return;
     }
@@ -635,7 +842,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     });
 
     setOffscreenFactPreviews(previews.sort((first, second) => first.distance - second.distance));
-  }, [activeInconsistencyId]);
+  }, [activeInconsistencyId, hiddenInconsistencyIds]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -964,8 +1171,8 @@ function getInconsistentTextRanges(
 ): InconsistentTextRange[] {
   const ranges: InconsistentTextRange[] = [];
 
-  for (const [index, inconsistency] of inconsistencies.entries()) {
-    const inconsistencyId = `inconsistency-${index}`;
+  for (const inconsistency of inconsistencies) {
+    const inconsistencyId = getStableInconsistencyId(inconsistency);
     const conflictFact = getConflictingFact(inconsistency);
 
     for (const fact of inconsistency.facts) {
@@ -1289,6 +1496,7 @@ function deserialize(
     setInconsistentRanges([]);
     setActiveInconsistencyId(null);
     setSelectedInconsistencyId(null);
+    selectedInconsistencyIdRef.current = null;
     setJitterSuppressedIds(new Set());
     replaceEditorContent(paragraphs);
   }
@@ -1305,9 +1513,14 @@ function deserialize(
         return;
       }
      
-      const result = useExampleFactsRef.current
-        ? EXAMPLE_FACTS
-        : await extractFacts(text,context);
+      let result: FactExtraction;
+
+      if (useExampleFactsRef.current) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3500));
+        result = EXAMPLE_FACTS;
+      } else {
+        result = await extractFacts(text, context);
+      }
 
       setAnalysis(result);
 
@@ -1315,6 +1528,7 @@ function deserialize(
         checkConsistency(result);
 
       setInconsistencies(foundInconsistencies);
+      setHiddenInconsistencyIds(new Set());
 
       const paths = getInconsistentPaths(
         editor,
@@ -1348,41 +1562,42 @@ function deserialize(
     }
   }
 
-  function handleResolveAll() {
-    setInconsistencies([]);
-    setInconsistentPaths([]);
-    setInconsistentRanges([]);
+  function handleToggleAllInconsistencies() {
+    const allAreHidden = inconsistencies.length > 0 && inconsistencies.every(
+      (item) => hiddenInconsistencyIds.has(getStableInconsistencyId(item))
+    );
+    setHiddenInconsistencyIds(allAreHidden
+      ? new Set()
+      : new Set(inconsistencies.map(getStableInconsistencyId))
+    );
     setActiveInconsistencyId(null);
     setSelectedInconsistencyId(null);
+    selectedInconsistencyIdRef.current = null;
     setJitterSuppressedIds(new Set());
     setOffscreenAbove([]);
     setOffscreenBelow([]);
     setOffscreenFactPreviews([]);
   }
 
-  function handleResolve(indexToResolve: number) {
-    const remainingInconsistencies = inconsistencies.filter(
-      (_, index) => index !== indexToResolve
-    );
-
-    setInconsistencies(remainingInconsistencies);
-    setInconsistentPaths(getInconsistentPaths(editor, remainingInconsistencies));
-    setInconsistentRanges(
-      getInconsistentTextRanges(editor, remainingInconsistencies)
-    );
-    setActiveInconsistencyId(null);
-    setSelectedInconsistencyId(null);
-    setJitterSuppressedIds(new Set());
-    setOffscreenAbove([]);
-    setOffscreenBelow([]);
-    setOffscreenFactPreviews([]);
-  }
-
-  function handleSuggestChange(inconsistency: Inconsistency) {
-    if (inconsistency.category !== "exclusive_fact") {
-      return;
+  function handleToggleInconsistency(inconsistencyId: string) {
+    const willHide = !hiddenInconsistencyIds.has(inconsistencyId);
+    setHiddenInconsistencyIds((current) => {
+      const next = new Set(current);
+      if (next.has(inconsistencyId)) next.delete(inconsistencyId);
+      else next.add(inconsistencyId);
+      return next;
+    });
+    if (willHide && selectedInconsistencyId === inconsistencyId) {
+      setActiveInconsistencyId(null);
+      setSelectedInconsistencyId(null);
+      selectedInconsistencyIdRef.current = null;
     }
+    setOffscreenAbove([]);
+    setOffscreenBelow([]);
+    setOffscreenFactPreviews([]);
+  }
 
+  function getDefaultSuggestion(inconsistency: Inconsistency): string {
     const orderedFacts = [...inconsistency.facts].sort(
       (first, second) =>
         (first.source?.paragraphIndex ?? Number.MAX_SAFE_INTEGER) -
@@ -1391,16 +1606,117 @@ function deserialize(
     const baseFact = orderedFacts[0];
     const baseValue = baseFact?.object ?? baseFact?.value;
 
-    if (baseValue === undefined || baseValue === null || baseValue === "") {
+    return inconsistency.category === "exclusive_fact" &&
+      baseValue !== undefined &&
+      baseValue !== null
+      ? String(baseValue)
+      : "";
+  }
+
+  function getSuggestionTargetFacts(inconsistency: Inconsistency) {
+    const orderedFacts = [...inconsistency.facts].sort(
+      (first, second) =>
+        (first.source?.paragraphIndex ?? Number.MAX_SAFE_INTEGER) -
+        (second.source?.paragraphIndex ?? Number.MAX_SAFE_INTEGER)
+    );
+    const baseValue = orderedFacts[0]?.object ?? orderedFacts[0]?.value;
+    const conflictingFact = getConflictingFact(inconsistency);
+
+    return inconsistency.category === "exclusive_fact"
+      ? orderedFacts.filter(
+          (fact) =>
+            normalizeSearchText(fact.object ?? fact.value) !==
+            normalizeSearchText(baseValue)
+        )
+      : conflictingFact
+        ? [conflictingFact]
+        : [];
+  }
+
+  function getSentenceRewriteCandidates(inconsistency: Inconsistency) {
+    const candidates = new Map<string, SentenceRewriteCandidate>();
+
+    for (const fact of getSuggestionTargetFacts(inconsistency)) {
+      const paragraphIndex = getFactParagraphIndex(editor, fact);
+      const pattern = getFactHighlightPattern(fact);
+      if (paragraphIndex === null || !pattern) {
+        continue;
+      }
+
+      for (const [node, path] of SlateNode.texts(editor)) {
+        if (path[0] !== paragraphIndex || node.changeType) {
+          continue;
+        }
+
+        for (const match of node.text.matchAll(pattern)) {
+          if (match.index === undefined || match[0].length === 0) {
+            continue;
+          }
+
+          const offsets = getSentenceOffsets(
+            node.text,
+            match.index,
+            match.index + match[0].length
+          );
+          const key = `${path.join(".")}:${offsets.start}:${offsets.end}`;
+          candidates.set(key, {
+            key,
+            text: node.text.slice(offsets.start, offsets.end).trim(),
+            range: {
+              anchor: { path, offset: offsets.start },
+              focus: { path, offset: offsets.end },
+            },
+          });
+        }
+      }
+    }
+
+    return Array.from(candidates.values());
+  }
+
+  function previewSentenceCandidate(candidate: SentenceRewriteCandidate) {
+    sentenceSuggestionReplayVersion.current += 1;
+    setSentenceRewriteTarget(candidate.key);
+    setSentenceSuggestionPreview({
+      ...candidate.range,
+      suggestionPreview: true,
+      replayVersion: sentenceSuggestionReplayVersion.current,
+    });
+
+    requestAnimationFrame(() => {
+      try {
+        const domRange = ReactEditor.toDOMRange(editor, candidate.range);
+        const element = domRange.commonAncestorContainer instanceof HTMLElement
+          ? domRange.commonAncestorContainer
+          : domRange.commonAncestorContainer.parentElement;
+        element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch {
+        // Der Text kann zwischen Auswahl und Rendern bearbeitet worden sein.
+      }
+    });
+  }
+
+  function openSuggestionEditor(inconsistency: Inconsistency) {
+    setSuggestionTarget(inconsistency);
+    setSuggestionDraft(getDefaultSuggestion(inconsistency));
+    setRewriteEntireSentence(false);
+    setSentenceRewriteTarget("");
+    setSentenceSuggestionPreview(null);
+  }
+
+  function handleSuggestChange(
+    inconsistency: Inconsistency,
+    requestedReplacement: string,
+    rewriteSentence: boolean,
+    selectedSentenceTarget: string
+  ) {
+    const replacement = requestedReplacement.trim();
+
+    if (!replacement) {
       return;
     }
 
-    const replacement = String(baseValue);
-    const targetFacts = orderedFacts.filter(
-      (fact) =>
-        normalizeSearchText(fact.object ?? fact.value) !==
-        normalizeSearchText(baseValue)
-    );
+    const targetFacts = getSuggestionTargetFacts(inconsistency);
     const ranges = new Map<string, BaseRange>();
     const replacedValues = new Set<string>();
 
@@ -1423,14 +1739,32 @@ function deserialize(
             continue;
           }
 
+          const sentenceOffsets = rewriteSentence
+            ? getSentenceOffsets(
+                node.text,
+                match.index,
+                match.index + match[0].length
+              )
+            : null;
           const range = {
-            anchor: { path, offset: match.index },
-            focus: { path, offset: match.index + match[0].length },
+            anchor: {
+              path,
+              offset: sentenceOffsets?.start ?? match.index,
+            },
+            focus: {
+              path,
+              offset:
+                sentenceOffsets?.end ?? match.index + match[0].length,
+            },
           };
-          ranges.set(
-            `${path.join(".")}:${range.anchor.offset}:${range.focus.offset}`,
-            range
-          );
+          const rangeKey = `${path.join(".")}:${range.anchor.offset}:${range.focus.offset}`;
+          if (
+            !rewriteSentence ||
+            selectedSentenceTarget === "all" ||
+            selectedSentenceTarget === rangeKey
+          ) {
+            ranges.set(rangeKey, range);
+          }
         }
       }
     }
@@ -1479,12 +1813,104 @@ function deserialize(
         replacement,
         replacedValues: Array.from(replacedValues),
         occurrenceCount: occurrences.length,
+        rewritesEntireSentence: rewriteSentence,
+        paragraphIndices: Array.from(new Set(
+          occurrences.map((range) => range.anchor.path[0])
+        )),
       },
     ]);
+    setSuggestionTarget(null);
+    setSuggestionDraft("");
+    setRewriteEntireSentence(false);
+    setSentenceRewriteTarget("");
+    setSentenceSuggestionPreview(null);
     setDocument([...editor.children]);
   }
 
-  function finishTrackedChange(change: TrackedChange, action: "accept" | "reject") {
+  async function reevaluateParagraphs(paragraphIndices: number[]) {
+    if (!analysis || paragraphIndices.length === 0) {
+      return;
+    }
+
+    setAnalyzing(true);
+    setAnalysisError("");
+
+    try {
+      const updatedExtractions = await Promise.all(
+        paragraphIndices.map(async (paragraphIndex) => {
+          const paragraph = editor.children[paragraphIndex];
+          const paragraphText = paragraph
+            ? getEditorText([paragraph])
+            : "";
+
+          if (!paragraphText.trim()) {
+            return {
+              paragraphIndex,
+              extraction: { entities: [], facts: [] } as FactExtraction,
+            };
+          }
+
+          const extraction = await extractFacts(paragraphText, context);
+          return { paragraphIndex, extraction };
+        })
+      );
+      const changedParagraphs = new Set(paragraphIndices);
+      const unchangedFacts = analysis.facts.filter(
+        (fact) =>
+          fact.source?.paragraphIndex === undefined ||
+          !changedParagraphs.has(fact.source.paragraphIndex)
+      );
+      const updatedFacts = updatedExtractions.flatMap(
+        ({ paragraphIndex, extraction }) =>
+          extraction.facts.map((fact) => ({
+            ...fact,
+            source: {
+              ...fact.source,
+              paragraphIndex,
+            },
+          }))
+      );
+      const entitiesById = new Map(
+        [...analysis.entities, ...updatedExtractions.flatMap(({ extraction }) => extraction.entities)]
+          .map((entity) => [entity.id, entity])
+      );
+      const updatedAnalysis: FactExtraction = {
+        entities: Array.from(entitiesById.values()),
+        facts: [...unchangedFacts, ...updatedFacts],
+      };
+      const updatedInconsistencies = checkConsistency(updatedAnalysis);
+
+      setAnalysis(updatedAnalysis);
+      setInconsistencies(updatedInconsistencies);
+      setInconsistentPaths(
+        getInconsistentPaths(editor, updatedInconsistencies)
+      );
+      setInconsistentRanges(
+        getInconsistentTextRanges(editor, updatedInconsistencies)
+      );
+      setActiveInconsistencyId(null);
+      setSelectedInconsistencyId(null);
+      selectedInconsistencyIdRef.current = null;
+      setJitterSuppressedIds(new Set());
+      setOffscreenAbove([]);
+      setOffscreenBelow([]);
+      setOffscreenFactPreviews([]);
+    } catch (error) {
+      console.error(error);
+      setAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "Unknown error during incremental analysis."
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function finishTrackedChange(
+    change: TrackedChange,
+    action: "accept" | "reject"
+  ) {
     const entries = Array.from(
       Editor.nodes(editor, {
         at: [],
@@ -1514,18 +1940,19 @@ function deserialize(
     setDocument([...editor.children]);
 
     if (action === "accept") {
-      const currentIndex = inconsistencies.indexOf(change.inconsistency);
-      if (currentIndex >= 0) {
-        handleResolve(currentIndex);
-      }
+      useExampleFactsRef.current = false;
+      exampleDocumentTextRef.current = "";
+      await reevaluateParagraphs(change.paragraphIndices);
+
     }
   }
 
-  const activeInconsistencyIndex = activeInconsistencyId
-    ? Number(activeInconsistencyId.replace("inconsistency-", ""))
-    : -1;
-  const activeInconsistencyImpact =
-    inconsistencies[activeInconsistencyIndex]?.impact ?? null;
+  const activeInconsistencyImpact = activeInconsistencyId
+    ? inconsistencies.find(
+        (inconsistency) =>
+          getStableInconsistencyId(inconsistency) === activeInconsistencyId
+      )?.impact ?? null
+    : null;
 
   return (
     <div className="content-container">
@@ -1533,33 +1960,22 @@ function deserialize(
         <EditorNavigation
         document={document}
         inconsistentPaths={inconsistentPaths}
-        onNavigate={(path) => {
-          try {
-            const point = Editor.start(editor, path);
-
-            Transforms.select(editor, {
-              anchor: point,
-              focus: point,
-            });
-
-            ReactEditor.focus(editor);
-
-            const element = ReactEditor.toDOMNode(
-              editor,
-              Editor.node(editor, path)[0]
-            );
-
-            element.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          } catch (error) {
-            console.error(
-              "Navigation zum Absatz fehlgeschlagen:",
-              error
-            );
-          }
-        }}
+        pageLineWidths={pageLineWidths}
+        pageLineTops={pageLineTops}
+        blockPageIndices={blockPageIndices}
+        inconsistencyPageIndices={inconsistencyPageIndices}
+        inconsistencyPositions={inconsistencyPositions}
+        activeInconsistencyIndex={activeInconsistencyId
+          ? inconsistencies.findIndex((item) => getStableInconsistencyId(item) === activeInconsistencyId)
+          : null}
+        hiddenInconsistencyIndices={new Set(
+          inconsistencies.flatMap((item, index) =>
+            hiddenInconsistencyIds.has(getStableInconsistencyId(item)) ? [index] : []
+          )
+        )}
+        pageCount={pageCount}
+        currentPage={currentPage}
+        onNavigatePage={navigateToPage}
         onNavigateInconsistency={focusInconsistency}
       />
         
@@ -1603,7 +2019,7 @@ function deserialize(
           analyzing={analyzing}
         />
         <div ref={editorScrollShellRef} className="editor-scroll-shell">
-          <div ref={editorScrollRef} className="editor-scroll-container" style={{minHeight:"200px"}}>
+          <div ref={editorScrollRef} className="editor-scroll-container" onScroll={updatePagination}>
             <Editable
             className={`editor${activeInconsistencyId ? " editor--scope-active" : ""}`}
             placeholder="Text eingeben ..."
@@ -1613,12 +2029,29 @@ function deserialize(
               activeInconsistencyId,
               activeInconsistencyImpact,
               jitterSuppressedIds,
+              hiddenInconsistencyIds,
               onConflictHoverChange: handleInconsistencyHover,
             })}
             decorate={decorateInconsistencies}
             spellCheck
             />
           </div>
+          {analyzing && (
+            <div
+              className="analysis-loading-overlay"
+              role="status"
+              aria-live="polite"
+              aria-label="Analyzing text"
+            >
+              <div className="analysis-loading-indicator" aria-hidden="true">
+                <span className="analysis-loading-ring" />
+                <span className="analysis-loading-label">
+                  Analyzing text<span className="analysis-loading-dots" />
+                </span>
+              </div>
+              <span className="analysis-loading-scan" aria-hidden="true" />
+            </div>
+          )}
           {factPreviewConnections.length > 0 && (
             <svg
               className="fact-preview-connection-overlay"
@@ -1684,6 +2117,11 @@ function deserialize(
             </div>
           )}
         </div>
+        <div className="page-controls" aria-label="Seitennavigation">
+          <button type="button" onClick={() => navigateToPage(currentPage - 1)} disabled={currentPage === 0}>← Zurück</button>
+          <span>Seite {currentPage + 1} von {pageCount}</span>
+          <button type="button" onClick={() => navigateToPage(currentPage + 1)} disabled={currentPage >= pageCount - 1}>Weiter →</button>
+        </div>
         
       </Slate>
     </div>
@@ -1693,10 +2131,12 @@ function deserialize(
         <button
           type="button"
           className="resolve-all-button"
-          onClick={handleResolveAll}
+          onClick={handleToggleAllInconsistencies}
           disabled={inconsistencies.length === 0}
         >
-          Resolve all
+          {inconsistencies.length > 0 && inconsistencies.every((item) =>
+            hiddenInconsistencyIds.has(getStableInconsistencyId(item))
+          ) ? "Show All" : "Hide All"}
         </button>
       </div>
       {inconsistencies.length === 0 ? (
@@ -1705,35 +2145,39 @@ function deserialize(
         </p>
       ) : (
         inconsistencies.map((inconsistency, index) => {
+          const inconsistencyId = getStableInconsistencyId(inconsistency);
+          const isHidden = hiddenInconsistencyIds.has(inconsistencyId);
           const severity = inconsistency.severity ?? "medium";
           const category = INCONSISTENCY_CATEGORY_PRESENTATION[inconsistency.category];
           const factTheme = getFactThemePresentation(inconsistency.predicate);
           const presentationLabel = `${factTheme.label} · ${category.label}`;
+          const sentenceCandidates = suggestionTarget === inconsistency
+            ? getSentenceRewriteCandidates(inconsistency)
+            : [];
 
           return (
             <div
-              key={index}
+              key={inconsistencyId}
               className={[
                 "conflict-card",
                 `conflict-card--${severity}`,
-                selectedInconsistencyId === `inconsistency-${index}`
+                selectedInconsistencyId === inconsistencyId
                   ? "conflict-card--selected"
                   : "",
+                isHidden ? "conflict-card--hidden" : "",
               ].filter(Boolean).join(" ")}
-              onMouseEnter={() => handleInconsistencyHover(`inconsistency-${index}`)}
-              onMouseLeave={() => handleInconsistencyHover(null)}
             >
               <button
                 type="button"
                 className="conflict-card-content"
-                onClick={() => focusInconsistency(index)}
-                aria-pressed={selectedInconsistencyId === `inconsistency-${index}`}
+                onClick={() => !isHidden && focusInconsistency(index)}
+                aria-pressed={selectedInconsistencyId === inconsistencyId}
+                aria-disabled={isHidden}
               >
                 <span
                   className="conflict-card-category-emoji"
                   role="img"
                   aria-label={presentationLabel}
-                  title={presentationLabel}
                 >
                   {factTheme.emoji}
                 </span>
@@ -1763,26 +2207,133 @@ function deserialize(
                 </span>
               </button>
               <div className="conflict-card-actions">
-                {inconsistency.category === "exclusive_fact" && (
-                  <button
-                    type="button"
-                    className="suggest-change-button"
-                    onClick={() => handleSuggestChange(inconsistency)}
-                    disabled={trackedChanges.some(
-                      (change) => change.inconsistency === inconsistency
-                    )}
-                  >
-                    Suggest change
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="suggest-change-button"
+                  onClick={() => openSuggestionEditor(inconsistency)}
+                  disabled={trackedChanges.some(
+                    (change) => change.inconsistency === inconsistency
+                  )}
+                >
+                  Suggest change
+                </button>
                 <button
                   type="button"
                   className="resolve-inconsistency-button"
-                  onClick={() => handleResolve(index)}
+                  onClick={() => handleToggleInconsistency(inconsistencyId)}
+                  aria-pressed={isHidden}
                 >
-                  Resolved
+                  <span aria-hidden="true">{isHidden ? "◉" : "⊘"}</span>
+                  {isHidden ? "Show" : "Hide"}
                 </button>
               </div>
+              {suggestionTarget === inconsistency && (
+                <form
+                  className="suggestion-editor"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    handleSuggestChange(
+                      inconsistency,
+                      suggestionDraft,
+                      rewriteEntireSentence,
+                      sentenceRewriteTarget
+                    );
+                  }}
+                >
+                  <label htmlFor={`suggestion-${index}`}>
+                    {rewriteEntireSentence
+                      ? "Replacement sentence"
+                      : "Replacement for the marked text"}
+                  </label>
+                  <textarea
+                    id={`suggestion-${index}`}
+                    value={suggestionDraft}
+                    onChange={(event) => setSuggestionDraft(event.target.value)}
+                    rows={2}
+                    autoFocus
+                  />
+                  <label className="rewrite-sentence-option">
+                    <input
+                      type="checkbox"
+                      checked={rewriteEntireSentence}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setRewriteEntireSentence(checked);
+                        const firstCandidate = sentenceCandidates[0];
+                        if (checked && firstCandidate) {
+                          previewSentenceCandidate(firstCandidate);
+                        } else {
+                          setSentenceRewriteTarget("");
+                          setSentenceSuggestionPreview(null);
+                        }
+
+                        if (
+                          checked &&
+                          suggestionDraft === getDefaultSuggestion(inconsistency)
+                        ) {
+                          setSuggestionDraft("");
+                        } else if (!checked && !suggestionDraft.trim()) {
+                          setSuggestionDraft(getDefaultSuggestion(inconsistency));
+                        }
+                      }}
+                    />
+                    Rewrite entire sentence
+                  </label>
+                  {rewriteEntireSentence && sentenceCandidates.length > 1 && (
+                    <fieldset className="sentence-target-options">
+                      <legend>Which sentence should be rewritten?</legend>
+                      {sentenceCandidates.map((candidate) => (
+                        <label key={candidate.key}>
+                          <input
+                            type="radio"
+                            name={`sentence-target-${inconsistencyId}`}
+                            value={candidate.key}
+                            checked={sentenceRewriteTarget === candidate.key}
+                            onChange={() => previewSentenceCandidate(candidate)}
+                          />
+                          <span>{candidate.text}</span>
+                        </label>
+                      ))}
+                      <label>
+                        <input
+                          type="radio"
+                          name={`sentence-target-${inconsistencyId}`}
+                          value="all"
+                          checked={sentenceRewriteTarget === "all"}
+                          onChange={() => {
+                            setSentenceRewriteTarget("all");
+                            setSentenceSuggestionPreview(null);
+                          }}
+                        />
+                        <span>Rewrite all matching sentences</span>
+                      </label>
+                    </fieldset>
+                  )}
+                  <div className="suggestion-editor-actions">
+                    <button
+                      type="submit"
+                      disabled={
+                        !suggestionDraft.trim() ||
+                        (rewriteEntireSentence && !sentenceRewriteTarget)
+                      }
+                    >
+                      Add suggestion
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSuggestionTarget(null);
+                        setSuggestionDraft("");
+                        setRewriteEntireSentence(false);
+                        setSentenceRewriteTarget("");
+                        setSentenceSuggestionPreview(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           );
         })
@@ -1793,7 +2344,9 @@ function deserialize(
           {trackedChanges.map((change) => (
             <div key={change.id} className="tracked-change-card">
               <p>
-                Replace {change.replacedValues.join(", ")} with {change.replacement}
+                {change.rewritesEntireSentence
+                  ? `Rewrite sentence as “${change.replacement}”`
+                  : `Replace ${change.replacedValues.join(", ")} with ${change.replacement}`}
                 {change.occurrenceCount > 1
                   ? ` (${change.occurrenceCount} occurrences)`
                   : ""}
@@ -1834,13 +2387,16 @@ function OffscreenMarker({
       className={`offscreen-inconsistency-marker offscreen-inconsistency-marker--${direction} offscreen-inconsistency-marker--${marker.severity}`}
       style={{
         left: `${marker.edgeOffset}px`,
-        opacity: marker.opacity,
-      }}
+        "--marker-opacity": marker.opacity,
+      } as React.CSSProperties}
       onClick={onClick}
       aria-label={`${label}. Scroll to this inconsistency.`}
-      title={label}
     >
-      <span aria-hidden="true">{factTheme.emoji}</span>
+      <span className="offscreen-inconsistency-marker-icon" aria-hidden="true">{factTheme.emoji}</span>
+      <span className="offscreen-inconsistency-tooltip" aria-hidden="true">
+        <strong>{factTheme.label}</strong>
+        <span>{category.label}</span>
+      </span>
     </button>
   );
 }
@@ -2075,8 +2631,19 @@ function renderLeaf({
   activeInconsistencyId,
   activeInconsistencyImpact,
   jitterSuppressedIds,
+  hiddenInconsistencyIds,
   onConflictHoverChange,
 }: any) {
+  const roleInconsistencyIds: string[] =
+    leaf.inconsistencyRole === "conflict"
+      ? leaf.conflictInconsistencyIds ?? []
+      : leaf.inconsistencyRole === "context"
+        ? leaf.previewInconsistencyIds ?? []
+        : leaf.sentenceInconsistencyIds ?? [];
+  const visibleRoleInconsistencyIds = roleInconsistencyIds.filter(
+    (id) => !hiddenInconsistencyIds.has(id)
+  );
+  const isHidden = roleInconsistencyIds.length > 0 && visibleRoleInconsistencyIds.length === 0;
   const activeRoleInconsistencyIds =
     leaf.inconsistencyRole === "conflict"
       ? leaf.conflictInconsistencyIds
@@ -2115,9 +2682,17 @@ function renderLeaf({
   return (
     <span
       style={
-        leaf.inconsistencyRole === "conflict" &&
+        leaf.suggestionPreview
+          ? {
+              animationName:
+                (leaf.replayVersion ?? 0) % 2 === 0
+                  ? "sentence-suggestion-preview-a"
+                  : "sentence-suggestion-preview-b",
+            }
+          : leaf.inconsistencyRole === "conflict" &&
         leaf.replayVersion &&
         !belongsToActiveScope &&
+        !isHidden &&
         !suppressJitter
           ? {
               animationName:
@@ -2129,9 +2704,10 @@ function renderLeaf({
           : undefined
       }
       {...attributes}
+      data-suggestion-preview={leaf.suggestionPreview || undefined}
       data-inconsistency-role={leaf.inconsistencyRole}
       data-preview-inconsistency-ids={
-        leaf.previewInconsistencyIds?.join(" ") || undefined
+        leaf.previewInconsistencyIds?.filter((id: string) => !hiddenInconsistencyIds.has(id)).join(" ") || undefined
       }
       data-sentence-inconsistency-ids={
         leaf.sentenceInconsistencyIds?.join(" ") || undefined
@@ -2143,11 +2719,15 @@ function renderLeaf({
       }
       data-conflict-inconsistency-ids={
         leaf.inconsistencyRole === "conflict"
-          ? leaf.conflictInconsistencyIds?.join(" ")
+          ? visibleRoleInconsistencyIds.join(" ") || undefined
           : undefined
       }
       className={
-        renderAsActiveSentence
+        leaf.suggestionPreview
+          ? "sentence-suggestion-preview"
+          : isHidden
+          ? undefined
+          : renderAsActiveSentence
           ? [
               "inconsistency-sentence",
               "inconsistency-sentence--active",
@@ -2187,14 +2767,14 @@ function renderLeaf({
               : undefined
       }
       onMouseEnter={
-        leaf.inconsistencyRole === "conflict"
+        leaf.inconsistencyRole === "conflict" && !isHidden
           ? () => onConflictHoverChange(
               leaf.conflictInconsistencyIds?.[0] ?? null
             )
           : undefined
       }
       onMouseLeave={
-        leaf.inconsistencyRole === "conflict"
+        leaf.inconsistencyRole === "conflict" && !isHidden
           ? () => onConflictHoverChange(null)
           : undefined
       }
