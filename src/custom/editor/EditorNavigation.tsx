@@ -10,20 +10,34 @@ export type InconsistentPath = {
   inconsistencies: Array<{ index: number; severity: InconsistencySeverity; predicate: string }>;
 };
 
+export type NavigationTextHighlight = {
+  key: string;
+  index: number;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  severity: InconsistencySeverity;
+  predicate: string;
+  success: boolean;
+};
+
 type Props = {
   document: Descendant[];
   inconsistentPaths: InconsistentPath[];
   pageLineWidths: number[][];
   pageLineTops: number[][];
+  pageLineLefts: number[][];
   blockPageIndices: number[];
   inconsistencyPageIndices: number[];
-  inconsistencyPositions: Array<{ page: number; x: number; y: number }>;
+  textHighlights: NavigationTextHighlight[];
   activeInconsistencyIndex: number | null;
+  successfulInconsistencyIndex: number | null;
   hiddenInconsistencyIndices: ReadonlySet<number>;
   pageCount: number;
   currentPage: number;
   onNavigatePage: (page: number) => void;
-  onNavigateInconsistency: (index: number) => void;
+  onNavigateTextHighlight: (highlight: NavigationTextHighlight) => void;
 };
 
 function buildPages(document: Descendant[], paths: InconsistentPath[], pageCount: number, measuredLines: number[][], blockPageIndices: number[], inconsistencyPageIndices: number[]) {
@@ -75,6 +89,10 @@ function buildPages(document: Descendant[], paths: InconsistentPath[], pageCount
 }
 
 function formatPredicate(predicate: string): string {
+  if (predicate.startsWith("character:")) {
+    const category = predicate.slice("character:".length).replaceAll("_", " ");
+    return `Character · ${category.charAt(0).toUpperCase()}${category.slice(1)}`;
+  }
   if (predicate === "age" || ["younger_than", "older_than"].includes(predicate)) return "Age";
   if (["born_in", "lives_in", "located_in"].includes(predicate)) return "Location";
   if (predicate === "occupation") return "Occupation";
@@ -93,6 +111,23 @@ function formatSeverity(severity: InconsistencySeverity): string {
 }
 
 function getPredicateIcon(predicate: string): string {
+  if (predicate.startsWith("character:")) {
+    const categoryIcons: Record<string, string> = {
+      knowledge: "💡",
+      belief: "🧭",
+      emotion: "❤️",
+      goal: "🎯",
+      motivation: "🔥",
+      memory: "🧠",
+      relationship: "🤝",
+      values_and_self_image: "🪞",
+      fear_and_need: "🛡️",
+      development: "🌱",
+      thought_action_gap: "⚖️",
+      point_of_view: "👁️",
+    };
+    return categoryIcons[predicate.slice("character:".length)] ?? "🧠";
+  }
   if (["born_in", "lives_in", "located_in"].includes(predicate)) return "📍";
   if (["age", "younger_than", "older_than"].includes(predicate)) return "🎂";
   if (["works_at", "occupation"].includes(predicate)) return "💼";
@@ -103,7 +138,7 @@ function getPredicateIcon(predicate: string): string {
   return "⚠️";
 }
 
-export default function EditorNavigation({ document, inconsistentPaths, pageLineWidths, pageLineTops, blockPageIndices, inconsistencyPageIndices, inconsistencyPositions, activeInconsistencyIndex, hiddenInconsistencyIndices, pageCount, currentPage, onNavigatePage, onNavigateInconsistency }: Props) {
+export default function EditorNavigation({ document, inconsistentPaths, pageLineWidths, pageLineTops, pageLineLefts, blockPageIndices, inconsistencyPageIndices, textHighlights, activeInconsistencyIndex, successfulInconsistencyIndex, hiddenInconsistencyIndices, pageCount, currentPage, onNavigatePage, onNavigateTextHighlight }: Props) {
   const [hoveredMarker, setHoveredMarker] = useState<{
     inconsistency: InconsistentPath["inconsistencies"][number];
     left: number;
@@ -124,39 +159,37 @@ export default function EditorNavigation({ document, inconsistentPaths, pageLine
               onClick={() => onNavigatePage(index)} aria-label={`Zu Seite ${index + 1} von ${pageCount}`}
               aria-current={currentPage === index ? "page" : undefined}>
               <span className="editor-page-preview-lines" aria-hidden="true">
-                {page.lineWidths.slice(0, 28).map((width, line) => <span key={line} style={{ width: `${width}%` }} />)}
+                {page.lineWidths.slice(0, 28).map((width, line) => <span key={line} style={{
+                  left: `${pageLineLefts[index]?.[line] ?? 0}%`,
+                  top: `${pageLineTops[index]?.[line] ?? 0}%`,
+                  width: `${width}%`,
+                }} />)}
               </span>
               <span className="editor-page-preview-number">{index + 1}</span>
             </button>
-            {page.inconsistencies.map((inconsistency) => {
-              const isHidden = hiddenInconsistencyIndices.has(inconsistency.index);
-              const position = inconsistencyPositions[inconsistency.index];
-              const lineTops = pageLineTops[index] ?? [];
-              const nearestLine = lineTops.reduce(
-                (nearest, top, lineIndex) =>
-                  Math.abs(top - (position?.y ?? 8)) < Math.abs((lineTops[nearest] ?? 0) - (position?.y ?? 8))
-                    ? lineIndex
-                    : nearest,
-                0,
-              );
-              const lineWidth = page.lineWidths[nearestLine] ?? 45;
+            {textHighlights.filter((highlight) => highlight.page === index).map((highlight) => {
+              const isHidden = hiddenInconsistencyIndices.has(highlight.index);
               return (
-                <span className="editor-page-conflict-position" key={inconsistency.index}
-                  style={{ left: "8px", top: `${10 + nearestLine * 3}px`, width: `calc((100% - 16px) * ${lineWidth / 100})` }}>
-                  <button type="button" className={`editor-page-conflict-line editor-page-conflict-line--${inconsistency.severity}${activeInconsistencyIndex === inconsistency.index ? " is-active" : ""}${isHidden ? " is-hidden" : ""}`}
-                    onClick={() => onNavigateInconsistency(inconsistency.index)}
+                <span className="editor-page-conflict-position" key={highlight.key}
+                  style={{
+                    left: `calc(16px + (100% - 32px) * ${highlight.x / 100})`,
+                    top: `calc(20px + (100% - 50px) * ${highlight.y / 100})`,
+                    width: `max(8px, calc((100% - 32px) * ${highlight.width / 100}))`,
+                  }}>
+                  <button type="button" className={`editor-page-conflict-line editor-page-conflict-line--${highlight.severity}${activeInconsistencyIndex === highlight.index ? " is-active" : ""}${activeInconsistencyIndex === highlight.index && hoveredMarker !== null && hoveredMarker.inconsistency.index !== highlight.index ? " is-hover-suppressed" : ""}${hoveredMarker?.inconsistency.index === highlight.index ? " is-related-hover" : ""}${highlight.success || successfulInconsistencyIndex === highlight.index ? " is-success" : ""}${isHidden ? " is-hidden" : ""}`}
+                    onClick={() => onNavigateTextHighlight(highlight)}
                     onMouseEnter={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
-                      setHoveredMarker({ inconsistency, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
                     }}
                     onMouseLeave={() => setHoveredMarker(null)}
                     onFocus={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
-                      setHoveredMarker({ inconsistency, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
                     }}
                     onBlur={() => setHoveredMarker(null)}
-                    aria-label={`${formatPredicate(inconsistency.predicate)}, Schweregrad ${inconsistency.severity}${isHidden ? ", im Editor ausgeblendet" : ""}`}>
-                    <span className="visually-hidden">{getPredicateIcon(inconsistency.predicate)}</span>
+                    aria-label={`${formatPredicate(highlight.predicate)}, Schweregrad ${highlight.severity}${isHidden ? ", im Editor ausgeblendet" : ""}`}>
+                    <span className="visually-hidden">{getPredicateIcon(highlight.predicate)}</span>
                   </button>
                 </span>
               );

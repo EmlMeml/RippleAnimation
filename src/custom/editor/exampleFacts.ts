@@ -21,12 +21,6 @@ export const EXAMPLE_FACTS: FactExtraction = {
       source: { paragraphIndex: 0 },
     },
     {
-      subject: "alice",
-      predicate: "occupation",
-      value: "royal cartographer",
-      source: { paragraphIndex: 0 },
-    },
-    {
       subject: "glassmere",
       predicate: "located_in",
       object: "frostvale",
@@ -39,28 +33,10 @@ export const EXAMPLE_FACTS: FactExtraction = {
       source: { paragraphIndex: 3 },
     },
     {
-      subject: "alice",
-      predicate: "younger_than",
-      object: "bob",
-      source: { paragraphIndex: 4 },
-    },
-    {
-      subject: "alice",
-      predicate: "older_than",
-      object: "bob",
-      source: { paragraphIndex: 5 },
-    },
-    {
       subject: "glassmere",
       predicate: "located_in",
       object: "sunreach",
       source: { paragraphIndex: 6 },
-    },
-    {
-      subject: "alice",
-      predicate: "occupation",
-      value: "court alchemist",
-      source: { paragraphIndex: 7 },
     },
     {
       subject: "alice",
