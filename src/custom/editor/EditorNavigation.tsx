@@ -38,6 +38,7 @@ type Props = {
   currentPage: number;
   onNavigatePage: (page: number) => void;
   onNavigateTextHighlight: (highlight: NavigationTextHighlight) => void;
+  onHoverTextHighlight: (highlight: NavigationTextHighlight | null) => void;
 };
 
 function buildPages(document: Descendant[], paths: InconsistentPath[], pageCount: number, measuredLines: number[][], blockPageIndices: number[], inconsistencyPageIndices: number[]) {
@@ -138,7 +139,7 @@ function getPredicateIcon(predicate: string): string {
   return "⚠️";
 }
 
-export default function EditorNavigation({ document, inconsistentPaths, pageLineWidths, pageLineTops, pageLineLefts, blockPageIndices, inconsistencyPageIndices, textHighlights, activeInconsistencyIndex, successfulInconsistencyIndex, hiddenInconsistencyIndices, pageCount, currentPage, onNavigatePage, onNavigateTextHighlight }: Props) {
+export default function EditorNavigation({ document, inconsistentPaths, pageLineWidths, pageLineTops, pageLineLefts, blockPageIndices, inconsistencyPageIndices, textHighlights, activeInconsistencyIndex, successfulInconsistencyIndex, hiddenInconsistencyIndices, pageCount, currentPage, onNavigatePage, onNavigateTextHighlight, onHoverTextHighlight }: Props) {
   const [hoveredMarker, setHoveredMarker] = useState<{
     inconsistency: InconsistentPath["inconsistencies"][number];
     left: number;
@@ -181,13 +182,15 @@ export default function EditorNavigation({ document, inconsistentPaths, pageLine
                     onMouseEnter={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
                       setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      onHoverTextHighlight(highlight);
                     }}
-                    onMouseLeave={() => setHoveredMarker(null)}
+                    onMouseLeave={() => { setHoveredMarker(null); onHoverTextHighlight(null); }}
                     onFocus={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
                       setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      onHoverTextHighlight(highlight);
                     }}
-                    onBlur={() => setHoveredMarker(null)}
+                    onBlur={() => { setHoveredMarker(null); onHoverTextHighlight(null); }}
                     aria-label={`${formatPredicate(highlight.predicate)}, Schweregrad ${highlight.severity}${isHidden ? ", im Editor ausgeblendet" : ""}`}>
                     <span className="visually-hidden">{getPredicateIcon(highlight.predicate)}</span>
                   </button>
