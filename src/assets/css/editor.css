@@ -571,6 +571,14 @@
   font-weight: 700;
 }
 
+.offscreen-fact-preview-emoji {
+  display: inline-block;
+  margin-right: 7px;
+  font-size: 1rem;
+  line-height: 1;
+  vertical-align: -0.1em;
+}
+
 .offscreen-fact-preview--success {
   border-color: #22c55e;
   background: rgb(240 253 244 / 96%);
