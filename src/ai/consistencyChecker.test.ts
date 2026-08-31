@@ -3850,3 +3850,51 @@ it("erkennt younger_than als konsistent, wenn die Altersdifferenz stimmt", () =>
 });
 
 });
+
+it("behandelt implizite Ortsangaben in späteren Absätzen als Szenenwechsel", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "alice",
+        predicate: "located_in",
+        object: "cottage",
+        temporal: { source: "implicit", from: "2026-08-14", to: "2026-08-14" },
+        source: { paragraphIndex: 10 },
+      },
+      {
+        subject: "alice",
+        predicate: "located_in",
+        object: "harbour",
+        temporal: { source: "implicit", from: "2026-08-14", to: "2026-08-14" },
+        source: { paragraphIndex: 26 },
+      },
+    ],
+  };
+
+  expect(checkConsistency(extraction)).toEqual([]);
+});
+
+it("behält explizit gleichzeitige Ortsangaben als Konflikt", () => {
+  const extraction: FactExtraction = {
+    entities: [],
+    facts: [
+      {
+        subject: "alice",
+        predicate: "located_in",
+        object: "cottage",
+        temporal: { text: "at noon", source: "explicit", from: "2026-08-14", to: "2026-08-14" },
+        source: { paragraphIndex: 10 },
+      },
+      {
+        subject: "alice",
+        predicate: "located_in",
+        object: "harbour",
+        temporal: { text: "at noon", source: "explicit", from: "2026-08-14", to: "2026-08-14" },
+        source: { paragraphIndex: 26 },
+      },
+    ],
+  };
+
+  expect(checkConsistency(extraction)).toHaveLength(1);
+});

@@ -706,6 +706,22 @@ function areLocatedInValuesCompatible(
   return false;
 }
 
+function isSequentialImplicitLocationChange(factA: Fact, factB: Fact): boolean {
+  if (
+    factA.temporal?.source !== "implicit" ||
+    factB.temporal?.source !== "implicit"
+  ) {
+    return false;
+  }
+
+  const paragraphA = factA.source?.paragraphIndex;
+  const paragraphB = factB.source?.paragraphIndex;
+
+  // Separate narrative paragraphs establish successive scene states unless
+  // the text explicitly anchors both locations to the same time.
+  return paragraphA !== undefined && paragraphB !== undefined && paragraphA !== paragraphB;
+}
+
 /* function isImplicitTemporalFact(fact: Fact): boolean {
   return fact.temporal?.source === "implicit";
 }
@@ -819,6 +835,10 @@ function checkExclusiveFacts(
                 factB
               )
             ) {
+              continue;
+            }
+
+            if (isSequentialImplicitLocationChange(factA, factB)) {
               continue;
             }
           }

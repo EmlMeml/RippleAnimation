@@ -12,6 +12,8 @@ export type InconsistentPath = {
 
 export type NavigationTextHighlight = {
   key: string;
+  sourceElementIndex: number;
+  sourceType: "mark" | "change";
   index: number;
   page: number;
   x: number;
@@ -142,6 +144,7 @@ function getPredicateIcon(predicate: string): string {
 export default function EditorNavigation({ document, inconsistentPaths, pageLineWidths, pageLineTops, pageLineLefts, blockPageIndices, inconsistencyPageIndices, textHighlights, activeInconsistencyIndex, successfulInconsistencyIndex, hiddenInconsistencyIndices, pageCount, currentPage, onNavigatePage, onNavigateTextHighlight, onHoverTextHighlight }: Props) {
   const [hoveredMarker, setHoveredMarker] = useState<{
     inconsistency: InconsistentPath["inconsistencies"][number];
+    highlightKey: string;
     left: number;
     top: number;
   } | null>(null);
@@ -181,13 +184,13 @@ export default function EditorNavigation({ document, inconsistentPaths, pageLine
                     onClick={() => onNavigateTextHighlight(highlight)}
                     onMouseEnter={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
-                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, highlightKey: highlight.key, left: rect.right + 10, top: rect.top + rect.height / 2 });
                       onHoverTextHighlight(highlight);
                     }}
                     onMouseLeave={() => { setHoveredMarker(null); onHoverTextHighlight(null); }}
                     onFocus={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
-                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, left: rect.right + 10, top: rect.top + rect.height / 2 });
+                      setHoveredMarker({ inconsistency: { index: highlight.index, severity: highlight.severity, predicate: highlight.predicate }, highlightKey: highlight.key, left: rect.right + 10, top: rect.top + rect.height / 2 });
                       onHoverTextHighlight(highlight);
                     }}
                     onBlur={() => { setHoveredMarker(null); onHoverTextHighlight(null); }}

@@ -41,6 +41,14 @@ interface CharacterConsistencyResponse {
   inconsistencies: CharacterInconsistency[];
 }
 
+type AbsoluteClaim = {
+  character: string;
+  verb: string;
+  polarity: "positive" | "negative";
+  paragraphIndex: number;
+  quote: string;
+};
+
 const categories = new Set<CharacterConsistencyCategory>([
   "knowledge", "belief", "emotion", "goal", "motivation", "memory",
   "relationship", "values_and_self_image", "fear_and_need", "development",
@@ -69,7 +77,137 @@ export function isCharacterConsistencyResponse(value: unknown): value is Charact
   });
 }
 
+const speechVerbs = "said|replied|asked|laughed|insisted|declared|answered|thought|remembered";
+
+function inferParagraphCharacter(paragraph: string): string | null {
+  const afterName = paragraph.match(new RegExp(`\\b([A-Z][\\p{L}'’-]+)\\s+(?:${speechVerbs})\\b`, "u"));
+  if (afterName) return afterName[1];
+
+  const afterVerb = paragraph.match(new RegExp(`\\b(?:${speechVerbs})\\s+([A-Z][\\p{L}'’-]+)\\b`, "u"));
+  if (afterVerb) return afterVerb[1];
+
+  const openingName = paragraph.match(/^\s*([A-Z][\p{L}'’-]+)\b/u)?.[1];
+  return openingName && !["The", "At", "Inside", "Beyond", "Far", "By", "After", "Before"]
+    .includes(openingName) ? openingName : null;
+}
+
+function canonicalVerb(rawVerb: string): string {
+  const verb = rawVerb.toLowerCase().replace(/[^a-z]/g, "");
+  const knownForms: Record<string, string> = {
+    believed: "believe",
+    believes: "believe",
+    trusted: "trust",
+    trusts: "trust",
+    cared: "care",
+    cares: "care",
+  };
+  return knownForms[verb] ?? verb.replace(/(?:ing|ed|s)$/, "");
+}
+
+function sentenceAt(paragraph: string, index: number): string {
+  let start = index;
+  let end = index;
+  while (start > 0 && !/[.!?]/.test(paragraph[start - 1])) start -= 1;
+  while (end < paragraph.length && !/[.!?]/.test(paragraph[end])) end += 1;
+  if (end < paragraph.length) end += 1;
+  return paragraph.slice(start, end).trim().replace(/^[“”"'\s]+|[“”"'\s]+$/g, "");
+}
+
+function extractAbsoluteClaims(text: string): AbsoluteClaim[] {
+  const claims: AbsoluteClaim[] = [];
+  const paragraphs = text.split(/\r?\n/);
+
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    const character = inferParagraphCharacter(paragraph);
+    if (!character) return;
+
+    const patterns: Array<{ pattern: RegExp; polarity: AbsoluteClaim["polarity"]; verbGroup: number }> = [
+      { pattern: /\bnever\s+(\p{L}+)/giu, polarity: "negative", verbGroup: 1 },
+      { pattern: /\b(?:do|does|did)n['’]?t\s+(\p{L}+)/giu, polarity: "negative", verbGroup: 1 },
+      { pattern: /\balways\s+(\p{L}+)/giu, polarity: "positive", verbGroup: 1 },
+      { pattern: /\b(\p{L}+)\s+all\s+(?:my|his|her|their)\s+life\b/giu, polarity: "positive", verbGroup: 1 },
+    ];
+
+    for (const { pattern, polarity, verbGroup } of patterns) {
+      for (const match of paragraph.matchAll(pattern)) {
+        if (match.index === undefined || !match[verbGroup]) continue;
+        claims.push({
+          character,
+          verb: canonicalVerb(match[verbGroup]),
+          polarity,
+          paragraphIndex,
+          quote: sentenceAt(paragraph, match.index),
+        });
+      }
+    }
+  });
+
+  return claims;
+}
+
+/** High-precision fallback for explicit absolute statements such as never/always. */
+export function checkExplicitCharacterContradictions(text: string): CharacterInconsistency[] {
+  const claims = extractAbsoluteClaims(text);
+  const grouped = new Map<string, AbsoluteClaim[]>();
+
+  for (const claim of claims) {
+    const key = `${claim.character.toLowerCase()}|${claim.verb}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), claim]);
+  }
+
+  const results: CharacterInconsistency[] = [];
+  for (const group of grouped.values()) {
+    const negative = group.find((claim) => claim.polarity === "negative");
+    const positive = group.find((claim) => claim.polarity === "positive");
+    if (!negative || !positive) continue;
+
+    results.push({
+      character: negative.character,
+      category: "belief",
+      kind: "likely_contradiction",
+      confidence: "high",
+      message: `${negative.character}'s absolute statements about ${negative.verb} contradict each other.`,
+      explanation: "One passage uses an explicit negative absolute while another uses an explicit positive absolute, without a stated transition.",
+      evidence: [
+        { paragraphIndex: negative.paragraphIndex, quote: negative.quote, interpretation: `Establishes that ${negative.character} never ${negative.verb}s.` },
+        { paragraphIndex: positive.paragraphIndex, quote: positive.quote, interpretation: `Establishes that ${negative.character} always ${negative.verb}s.` },
+      ],
+    });
+  }
+
+  return results;
+}
+
+export function mergeCharacterInconsistencies(
+  deterministic: CharacterInconsistency[],
+  aiGenerated: CharacterInconsistency[]
+): CharacterInconsistency[] {
+  const merged = [...deterministic];
+  for (const candidate of aiGenerated) {
+    const searchableText = [
+      candidate.message,
+      candidate.explanation,
+      ...candidate.evidence.map((item) => `${item.quote} ${item.interpretation}`),
+    ].join(" ");
+    // Age continuity belongs to the deterministic Story Facts checker, even
+    // when a model frames the discrepancy as self-image or memory.
+    if (/\bage\b|\byears?\s+old\b|\bturned\s+(?:\d+|[a-z]+(?:[-\s][a-z]+)?)/i.test(searchableText)) {
+      continue;
+    }
+
+    const candidateParagraphs = new Set(candidate.evidence.map((item) => item.paragraphIndex));
+    const duplicate = merged.some((existing) =>
+      existing.character.toLowerCase() === candidate.character.toLowerCase() &&
+      existing.category === candidate.category &&
+      existing.evidence.some((item) => candidateParagraphs.has(item.paragraphIndex))
+    );
+    if (!duplicate) merged.push(candidate);
+  }
+  return merged;
+}
+
 export async function checkCharacterConsistency(text: string): Promise<CharacterInconsistency[]> {
+  const startedAt = performance.now();
   const numberedText = text.split(/\r?\n/).map((paragraph, index) =>
     `[Paragraph ${index}] ${paragraph}`
   ).join("\n");
@@ -101,6 +239,37 @@ Return ONLY JSON in this exact shape:
 STORY:
 ${numberedText}`;
 
-  const response = await askAIStructured(prompt, isCharacterConsistencyResponse);
-  return response.inconsistencies;
+  const deterministic = checkExplicitCharacterContradictions(text);
+  const attempts = await Promise.allSettled([
+    askAIStructured(prompt, isCharacterConsistencyResponse),
+    askAIStructured(prompt, isCharacterConsistencyResponse),
+  ]);
+  const successful = attempts.flatMap((attempt) =>
+    attempt.status === "fulfilled" ? attempt.value.inconsistencies : []
+  );
+
+  if (attempts.every((attempt) => attempt.status === "rejected") && deterministic.length === 0) {
+    throw attempts[0].status === "rejected"
+      ? attempts[0].reason
+      : new Error("Character consistency analysis failed.");
+  }
+
+  const merged = mergeCharacterInconsistencies(deterministic, successful);
+
+  console.groupCollapsed(
+    `[Character consistency] ${merged.length} issue${merged.length === 1 ? "" : "s"} ` +
+    `(${((performance.now() - startedAt) / 1000).toFixed(2)}s)`
+  );
+  console.log("Deterministic issues:", deterministic);
+  attempts.forEach((attempt, index) => {
+    if (attempt.status === "fulfilled") {
+      console.log(`AI attempt ${index + 1}:`, attempt.value.inconsistencies);
+    } else {
+      console.warn(`AI attempt ${index + 1} failed:`, attempt.reason);
+    }
+  });
+  console.log("Merged character issues:", merged);
+  console.groupEnd();
+
+  return merged;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { extractFacts } from "./extractesFacts";
 import { askAI } from "./../ai/api";
 import type { FactExtraction } from "../types/facts";
+import { checkConsistency } from "../ai/consistencyChecker";
 
 vi.mock("./../ai/api", () => ({
   askAI: vi.fn(),
@@ -288,6 +289,29 @@ describe("extractFacts", () => {
       advancesTimeline: false,
     },
   });
+  });
+
+  it("sichert explizite Alterskonflikte ab, wenn die AI beide Fakten auslässt", async () => {
+    vi.mocked(askAI).mockResolvedValue({
+      entities: [
+        { id: "alice", name: "Alice", type: "person" },
+        { id: "eve", name: "Eve", type: "person" },
+      ],
+      facts: [],
+    });
+    const text = [
+      "Alice arrived in Greyhaven. At thirty-two, she felt too old to return.",
+      "“You look exactly the same,” Eve said.",
+      "“That’s generous. I turned twenty-nine last month.”",
+    ].join("\n");
+
+    const result = await extractFacts(text, context);
+
+    expect(result.facts.filter((fact) => fact.predicate === "age").map((fact) => fact.value))
+      .toEqual([32, 29]);
+    expect(checkConsistency(result)).toEqual([
+      expect.objectContaining({ predicate: "age", category: "exclusive_fact" }),
+    ]);
   });
 
 });

@@ -15,10 +15,12 @@
 .editor-page-conflict-line--high { --minimap-line-color: #ef4444; }
 .editor-page-conflict-line--critical { --minimap-line-color: #b91c1c; }
 .editor-page-conflict-line.is-hidden {
-  background: #c98787;
-  opacity: 0.68;
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 70%);
-  filter: saturate(0.72);
+  background: #ad9298;
+  opacity: 0.82;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 72%),
+    0 0 0 2px rgb(185 28 28 / 8%);
+  filter: saturate(0.58);
 }
 .editor-page-conflict-line.is-active { animation: minimap-line-ripple 1.4s ease-in-out infinite; }
 .editor-page-conflict-line.is-related-hover { animation: minimap-line-ripple 1.05s ease-in-out infinite; }
