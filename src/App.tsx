@@ -6,8 +6,8 @@ import type { StoryContext } from "./types/story";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   completeStudyLogging,
+  beginStudySession,
   initializeStudyLogging,
-  setStudyParticipantCode,
 } from "./study/logger";
 
 type StudyPhase = "consent" | "running" | "confirming" | "completed";
@@ -32,7 +32,7 @@ function App() {
     event.preventDefault();
     const normalizedCode = participantCode.trim();
     if (!normalizedCode || !consented) return;
-    setStudyParticipantCode(normalizedCode);
+    beginStudySession(normalizedCode);
     setPhase("running");
   }
 

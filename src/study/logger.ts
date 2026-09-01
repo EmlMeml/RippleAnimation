@@ -73,11 +73,15 @@ function scheduleFlush() {
   }, FLUSH_DELAY_MS);
 }
 
-export function setStudyParticipantCode(code: string | null) {
+export function beginStudySession(code: string) {
   if (!storageAvailable()) return;
-  const normalized = code?.trim().slice(0, 40);
-  if (normalized) window.sessionStorage.setItem(PARTICIPANT_KEY, normalized);
-  else window.sessionStorage.removeItem(PARTICIPANT_KEY);
+  const normalized = code.trim().slice(0, 40);
+  window.sessionStorage.setItem(PARTICIPANT_KEY, normalized);
+  window.sessionStorage.setItem(SESSION_KEY, crypto.randomUUID());
+  sequenceNumber = 0;
+  studyStartedLogged = false;
+  studyCompletedLogged = false;
+  activeWork = null;
 }
 
 export async function completeStudyLogging(): Promise<boolean> {
