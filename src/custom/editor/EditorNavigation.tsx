@@ -181,6 +181,9 @@ export default function EditorNavigation({ document, inconsistentPaths, pageLine
                     width: `max(8px, calc((100% - 32px) * ${highlight.width / 100}))`,
                   }}>
                   <button type="button" className={`editor-page-conflict-line editor-page-conflict-line--${highlight.severity}${activeInconsistencyIndex === highlight.index ? " is-active" : ""}${activeInconsistencyIndex === highlight.index && hoveredMarker !== null && hoveredMarker.inconsistency.index !== highlight.index ? " is-hover-suppressed" : ""}${hoveredMarker?.inconsistency.index === highlight.index ? " is-related-hover" : ""}${highlight.success || successfulInconsistencyIndex === highlight.index ? " is-success" : ""}${isHidden ? " is-hidden" : ""}`}
+                    data-study-navigation-marker="true"
+                    data-study-inconsistency-index={highlight.index}
+                    data-study-page={highlight.page}
                     onClick={() => onNavigateTextHighlight(highlight)}
                     onMouseEnter={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();

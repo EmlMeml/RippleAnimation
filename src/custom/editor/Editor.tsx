@@ -45,6 +45,11 @@ import { EXAMPLE_FACTS } from "./exampleFacts";
 import { EXAMPLE_CHARACTER_INCONSISTENCIES } from "./exampleCharacterInconsistencies";
 
 import type { StoryContext } from "../../types/story";
+import {
+  finishInconsistencyWork,
+  logStudyEvent,
+  startInconsistencyWork,
+} from "../../study/logger";
 
 type CustomText = {
   text: string;
@@ -170,6 +175,7 @@ let nextStableCharacterInconsistencyId = 0;
  * Änderung derzeit aber übersprungen. Zum Reaktivieren auf `true` setzen.
  */
 const ENABLE_AI_CHANGE_ACCEPT_CHECK = false;
+const MIN_STUDY_HOVER_DURATION_MS = 300;
 
 function getStableInconsistencyId(inconsistency: Inconsistency): string {
   const existingId = stableInconsistencyIds.get(inconsistency);
@@ -401,25 +407,42 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   }>());
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const editorScrollShellRef = useRef<HTMLDivElement>(null);
+  const studyHoverStartsRef = useRef(new WeakMap<HTMLElement, {
+    startedAt: number;
+    inconsistencyId: string;
+    source: "editor_marker" | "left_navigation";
+    page?: number;
+  }>());
 
-  function captureEditorScrollPosition() {
+  function captureEditorScrollPosition(preferredElement?: HTMLElement | null) {
     const container = editorScrollRef.current;
     const scrollTop = container?.scrollTop;
     const containerRect = container?.getBoundingClientRect();
-    const pointedAnchor = container && containerRect
-      ? (window.document.elementFromPoint(
-          containerRect.left + containerRect.width / 2,
-          containerRect.top + Math.min(containerRect.height / 3, 180)
-        )?.closest("[data-slate-node='element']") as HTMLElement | null)
+    const editable = container?.firstElementChild as HTMLElement | null;
+    const blocks = Array.from(
+      editable?.querySelectorAll<HTMLElement>(":scope > [data-slate-node='element']") ?? []
+    );
+    const anchorY = containerRect
+      ? containerRect.top + Math.min(containerRect.height / 3, 180)
       : null;
-    const anchor = pointedAnchor ?? (container && containerRect
-      ? Array.from(
-          container.querySelectorAll<HTMLElement>("[data-slate-node='element']")
-        ).find((element) => {
+    let preferredBlock = preferredElement ?? null;
+    while (
+      preferredBlock &&
+      preferredBlock.parentElement !== editable
+    ) {
+      preferredBlock = preferredBlock.parentElement;
+    }
+    if (preferredBlock?.parentElement !== editable) preferredBlock = null;
+    const anchor = preferredBlock ?? (anchorY === null
+      ? null
+      : blocks.find((element) => {
           const rect = element.getBoundingClientRect();
-          return rect.bottom >= containerRect.top && rect.top <= containerRect.bottom;
-        }) ?? null
-      : null);
+          return rect.top <= anchorY && rect.bottom >= anchorY;
+        }) ?? blocks.find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.bottom >= (containerRect?.top ?? 0);
+        }) ?? null);
+    const anchorIndex = anchor ? blocks.indexOf(anchor) : -1;
     const anchorTop = anchor && containerRect
       ? anchor.getBoundingClientRect().top - containerRect.top
       : null;
@@ -428,9 +451,17 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       if (!container || scrollTop === undefined) return;
 
       const restoreAnchor = () => {
-        if (anchor?.isConnected && anchorTop !== null) {
+        const currentEditable = container.firstElementChild as HTMLElement | null;
+        const currentAnchor = anchorIndex >= 0
+          ? Array.from(
+              currentEditable?.querySelectorAll<HTMLElement>(
+                ":scope > [data-slate-node='element']"
+              ) ?? []
+            )[anchorIndex]
+          : null;
+        if (currentAnchor && anchorTop !== null) {
           const currentContainerTop = container.getBoundingClientRect().top;
-          const currentAnchorTop = anchor.getBoundingClientRect().top - currentContainerTop;
+          const currentAnchorTop = currentAnchor.getBoundingClientRect().top - currentContainerTop;
           container.scrollTop += currentAnchorTop - anchorTop;
         } else {
           container.scrollTop = scrollTop;
@@ -541,6 +572,10 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [factPreviewConnections, setFactPreviewConnections] =
     useState<FactPreviewConnection[]>([]);
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
+  const [finalizingChangeIds, setFinalizingChangeIds] =
+    useState<Set<string>>(() => new Set());
+  const [finalizingInsertionOnlyChangeIds, setFinalizingInsertionOnlyChangeIds] =
+    useState<Set<string>>(() => new Set());
   const [characterDecisions, setCharacterDecisions] = useState<CharacterDecision[]>([]);
   const [expandedTrackedChangeId, setExpandedTrackedChangeId] = useState<string | null>(null);
   const nextTrackedChangeId = useRef(0);
@@ -975,7 +1010,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   function focusInconsistency(
     index: number,
     scrollToRange = true,
-    toggleSelection = true
+    toggleSelection = true,
+    studySource = "right_card"
   ) {
     const factualInconsistency = inconsistencies[index];
     const characterInconsistency = index >= inconsistencies.length
@@ -989,6 +1025,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     if (!inconsistencyId) return;
 
     if (toggleSelection && selectedInconsistencyId === inconsistencyId) {
+      finishInconsistencyWork("deselected");
       setSelectedInconsistencyId(null);
       selectedInconsistencyIdRef.current = null;
       setActiveInconsistencyId(null);
@@ -1049,6 +1086,11 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     setActiveInconsistencyId(inconsistencyId);
     setSelectedInconsistencyId(inconsistencyId);
     selectedInconsistencyIdRef.current = inconsistencyId;
+    logStudyEvent("inconsistency_selected", {
+      inconsistency_id: inconsistencyId,
+      source: studySource,
+    });
+    startInconsistencyWork(inconsistencyId, studySource);
     scrollToInconsistencyCard(inconsistencyId);
     animationReplayVersion.current += 1;
     const replayVersion = animationReplayVersion.current;
@@ -2198,6 +2240,11 @@ function deserialize(
         });
     }
     replaceEditorContent(nodes);
+    logStudyEvent("document_loaded", {
+      source: "file",
+      format: "html_or_docx",
+      character_count: getEditorText(nodes).length,
+    });
     
     }
 
@@ -2212,6 +2259,11 @@ function deserialize(
       }));
 
     replaceEditorContent(paragraphs);
+    logStudyEvent("document_loaded", {
+      source: "file",
+      format: "plain_text",
+      character_count: text.length,
+    });
     console.log("AFTER FILE LOAD", {
       children: editor.children,
       selection: editor.selection,
@@ -2240,9 +2292,19 @@ function deserialize(
     resolvedInconsistencyIdsRef.current.clear();
     setJitterSuppressedIds(new Set());
     replaceEditorContent(paragraphs);
+    logStudyEvent("document_loaded", {
+      source: "example",
+      format: "plain_text",
+      character_count: EXAMPLE_TEXT.length,
+    });
   }
 
   async function handleAnalyze() {
+    const analysisStartedAt = performance.now();
+    let analysisOutcome = "completed";
+    logStudyEvent("analysis_started", {
+      character_count: getEditorText(editor.children).length,
+    });
     setAnalyzing(true);
     setAnalysisError("");
     resolvedInconsistencyIdsRef.current.clear();
@@ -2251,6 +2313,7 @@ function deserialize(
       const text = getEditorText(editor.children);
       console.log('editor-text: ',text);
       if (!text.trim()) {
+        analysisOutcome = "empty_document";
         setAnalysisError("The editor is empty.");
         return;
       }
@@ -2385,7 +2448,12 @@ function deserialize(
       }
 
     } catch (error) {
+      analysisOutcome = "error";
       console.error(error);
+      logStudyEvent("error", {
+        operation: "analysis",
+        message: error instanceof Error ? error.message.slice(0, 500) : "Unknown error",
+      });
 
       setAnalysisError(
         error instanceof Error
@@ -2394,6 +2462,10 @@ function deserialize(
       );
     } finally {
       setAnalyzing(false);
+      logStudyEvent("analysis_finished", {
+        outcome: analysisOutcome,
+        duration_ms: Math.round(performance.now() - analysisStartedAt),
+      });
     }
   }
 
@@ -2577,9 +2649,18 @@ function deserialize(
             anchor: { path, offset: match.index },
             focus: { path, offset: match.index + match[0].length },
           };
+          const sentence = getSentenceOffsets(
+            node.text,
+            match.index,
+            match.index + match[0].length
+          );
+          const previewText = node.text
+            .slice(sentence.start, sentence.end)
+            .trim();
           positions.set(`${path.join(".")}:${match.index}:${match.index + match[0].length}`, {
             fact,
             range,
+            previewText: previewText || match[0],
           });
         }
       }
@@ -2608,7 +2689,26 @@ function deserialize(
       return [{ fact: passage.fact, range, previewText: passage.text }];
     });
 
-    return [...Array.from(positions.values()), ...dependentPositions].filter((position) =>
+    const mergedPositions = Array.from(positions.values());
+    dependentPositions.forEach((dependentPosition) => {
+      const isDuplicate = mergedPositions.some((existingPosition) => {
+        const samePassageText = Boolean(
+          existingPosition.previewText &&
+          dependentPosition.previewText &&
+          normalizeSearchText(existingPosition.previewText) ===
+            normalizeSearchText(dependentPosition.previewText)
+        );
+        if (samePassageText) return true;
+        try {
+          return Range.intersection(existingPosition.range, dependentPosition.range) !== null;
+        } catch {
+          return false;
+        }
+      });
+      if (!isDuplicate) mergedPositions.push(dependentPosition);
+    });
+
+    return mergedPositions.filter((position) =>
       !confirmedPositionKeys.has(getAffectedPositionKey(inconsistency, position))
     ).sort((first, second) => {
       const pathOrder = Path.compare(first.range.anchor.path, second.range.anchor.path);
@@ -2952,6 +3052,12 @@ function deserialize(
         contexts: changeContexts,
       },
     ]);
+    logStudyEvent("suggestion_accepted", {
+      inconsistency_id: getStableInconsistencyId(inconsistency),
+      source: "direct",
+      occurrence_count: occurrences.length,
+      replacement_character_count: replacement.length,
+    });
     if (newlyDependentPassages.length > 0) {
       setDependentPassages((current) => {
         const keys = new Set(current.flatMap((passage) => {
@@ -3406,9 +3512,14 @@ function deserialize(
   function navigateToTextHighlight(highlight: NavigationTextHighlight) {
     const inconsistencyId = navigationItems[highlight.index]?.id;
     if (!inconsistencyId) return;
+    logStudyEvent("navigation_marker_clicked", {
+      inconsistency_id: inconsistencyId,
+      page: highlight.page,
+      severity: highlight.severity,
+    });
 
     if (selectedInconsistencyId !== inconsistencyId) {
-      focusInconsistency(highlight.index, false);
+      focusInconsistency(highlight.index, false, true, "left_navigation");
     } else {
       setActiveInconsistencyId(inconsistencyId);
       scrollToInconsistencyCard(inconsistencyId);
@@ -3526,6 +3637,13 @@ function deserialize(
     change: TrackedChange,
     action: "accept" | "reject"
   ) {
+    const inconsistencyId = getStableInconsistencyId(change.inconsistency);
+    logStudyEvent(action === "accept" ? "suggestion_accepted" : "suggestion_rejected", {
+      inconsistency_id: inconsistencyId,
+      source: change.source ?? "direct",
+      occurrence_count: change.occurrenceCount,
+    });
+    finishInconsistencyWork(action === "accept" ? "suggestion_accepted" : "suggestion_rejected");
     const entries = Array.from(
       Editor.nodes(editor, {
         at: [],
@@ -3676,10 +3794,17 @@ function deserialize(
 
 
   async function checkFreeChanges() {
+    const editedInconsistencyId = freeEditInconsistencyIdRef.current;
     const restoreScrollPosition = captureEditorScrollPosition();
 
     try {
       await applyFreeChanges();
+      if (editedInconsistencyId) {
+        logStudyEvent("manual_edit_finished", {
+          inconsistency_id: editedInconsistencyId,
+          paragraph_count: freeEditParagraphs.length,
+        });
+      }
     } finally {
       restoreScrollPosition();
     }
@@ -3925,7 +4050,56 @@ function deserialize(
   async function completeResolution(resolutionId?: string) {
     const targetResolutionId = resolutionId ?? successfulInconsistencyId;
     if (!targetResolutionId) return;
-    const restoreScrollPosition = captureEditorScrollPosition();
+    finishInconsistencyWork("resolved");
+    const resolutionChangeIds = new Set([
+      ...trackedChanges
+        .filter((change) =>
+          getStableInconsistencyId(change.inconsistency) === targetResolutionId
+        )
+        .map((change) => change.id),
+      ...characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === targetResolutionId
+        )
+        .map((decision) => decision.id),
+    ]);
+    const scrollContainer = editorScrollRef.current;
+    const viewport = scrollContainer?.getBoundingClientRect();
+    const resolutionElements = Array.from(
+      scrollContainer?.querySelectorAll<HTMLElement>("[data-change-id]") ?? []
+    ).filter((element) =>
+      Boolean(element.dataset.changeId && resolutionChangeIds.has(element.dataset.changeId))
+    );
+    const visibleResolutionElements = viewport
+      ? resolutionElements.filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.bottom >= viewport.top && rect.top <= viewport.bottom;
+        })
+      : [];
+    const preferredResolutionElement = (visibleResolutionElements.length > 0
+      ? visibleResolutionElements
+      : resolutionElements
+    ).reduce<HTMLElement | null>((closest, element) => {
+      if (!closest || !viewport) return element;
+      const viewportCenter = viewport.top + viewport.height / 2;
+      const closestRect = closest.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      return Math.abs(elementRect.top + elementRect.height / 2 - viewportCenter) <
+        Math.abs(closestRect.top + closestRect.height / 2 - viewportCenter)
+        ? element
+        : closest;
+    }, null);
+    const restoreScrollPosition = captureEditorScrollPosition(preferredResolutionElement);
+    const resolvesCharacterInconsistency = characterInconsistencies.some(
+      (item) => getStableCharacterInconsistencyId(item) === targetResolutionId
+    );
+    const resolvedCharacterDecisionIds = new Set(
+      characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === targetResolutionId
+        )
+        .map((decision) => decision.id)
+    );
 
     // A resolved card must no longer keep the editor in scoped/selected mode.
     // Clear this before Slate removes accepted nodes so adjacent decorations
@@ -3937,6 +4111,10 @@ function deserialize(
     setOffscreenAbove([]);
     setOffscreenBelow([]);
     setOffscreenFactPreviews([]);
+    if (successfulInconsistencyIdRef.current === targetResolutionId) {
+      successfulInconsistencyIdRef.current = null;
+      successfulRangesRef.current = [];
+    }
 
     {
       // Slate emits an onValueChange while accepted deletion nodes are removed.
@@ -3946,18 +4124,52 @@ function deserialize(
       const acceptedChanges = trackedChanges.filter((change) =>
         getStableInconsistencyId(change.inconsistency) === targetResolutionId
       );
+      const insertionOnlyChangeIds = new Set<string>();
+      let finalizationDuration = resolvedCharacterDecisionIds.size > 0 ? 660 : 0;
+      acceptedChanges.forEach((change) => {
+        const changedNodes = Array.from(Editor.nodes(editor, {
+          at: [],
+          match: (node) =>
+            Text.isText(node) &&
+            node.changeId === change.id,
+        })).map(([node]) => node).filter(Text.isText);
+        const hasDeletion = changedNodes.some((node) => node.changeType === "deletion");
+        const hasInsertion = changedNodes.some((node) =>
+          node.changeType === "insertion" || node.confirmedCorrect
+        );
+        if (!hasDeletion) insertionOnlyChangeIds.add(change.id);
+        finalizationDuration = Math.max(
+          finalizationDuration,
+          hasDeletion && hasInsertion ? 1440 : hasDeletion ? 780 : 660
+        );
+      });
+      const allFinalizingChangeIds = new Set([
+        ...acceptedChanges.map((change) => change.id),
+        ...resolvedCharacterDecisionIds,
+      ]);
+      resolvedCharacterDecisionIds.forEach((id) => insertionOnlyChangeIds.add(id));
+      // Measure deletion leaves while they still have their natural inline
+      // width. Measuring after the finalizing class is rendered would read the
+      // 30em fallback and create a large empty spacer during the wipe.
       acceptedChanges.forEach((change) => {
         window.document.querySelectorAll<HTMLElement>(`[data-change-id="${change.id}"]`)
           .forEach((element) => {
             const deletion = element.querySelector<HTMLElement>(".tracked-deletion");
             if (deletion) {
-              element.style.setProperty("--tracked-deletion-width", `${deletion.getBoundingClientRect().width}px`);
+              element.style.setProperty(
+                "--tracked-deletion-width",
+                `${deletion.getBoundingClientRect().width}px`
+              );
             }
-            element.classList.add("tracked-change-finalizing");
           });
       });
-      if (acceptedChanges.length > 0) {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1440));
+      setFinalizingChangeIds(allFinalizingChangeIds);
+      setFinalizingInsertionOnlyChangeIds(insertionOnlyChangeIds);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      if (allFinalizingChangeIds.size > 0) {
+        await new Promise<void>((resolve) =>
+          window.setTimeout(resolve, finalizationDuration)
+        );
       }
       Editor.withoutNormalizing(editor, () => {
         for (const change of acceptedChanges) {
@@ -3982,20 +4194,12 @@ function deserialize(
       setTrackedChanges((changes) => changes.filter((change) =>
         !acceptedChanges.some((accepted) => accepted.id === change.id)
       ));
+      setFinalizingChangeIds(new Set());
+      setFinalizingInsertionOnlyChangeIds(new Set());
       setDocument([...editor.children]);
     }
 
-    const resolvesCharacterInconsistency = characterInconsistencies.some(
-      (item) => getStableCharacterInconsistencyId(item) === targetResolutionId
-    );
     if (resolvesCharacterInconsistency) {
-      const resolvedCharacterDecisionIds = new Set(
-        characterDecisions
-          .filter((decision) =>
-            getStableCharacterInconsistencyId(decision.inconsistency) === targetResolutionId
-          )
-          .map((decision) => decision.id)
-      );
       Editor.withoutNormalizing(editor, () => {
         const entries = Array.from(Editor.nodes(editor, {
           at: [],
@@ -4082,6 +4286,22 @@ function deserialize(
       )?.impact ?? null
     : null;
 
+  const visibleConfirmedChangeIds = new Set([
+    ...trackedChanges.flatMap((change) =>
+      change.source === "confirmed" &&
+      !effectiveHiddenInconsistencyIds.has(getStableInconsistencyId(change.inconsistency))
+        ? [change.id]
+        : []
+    ),
+    ...characterDecisions.flatMap((decision) =>
+      !effectiveHiddenInconsistencyIds.has(
+        getStableCharacterInconsistencyId(decision.inconsistency)
+      )
+        ? [decision.id]
+        : []
+    ),
+  ]);
+
   const isFreeEditActive = Boolean(
     freeEditInconsistency || freeEditCharacterInconsistency
   );
@@ -4103,11 +4323,136 @@ function deserialize(
     event.stopPropagation();
   }
 
+  function handleFreeEditEditorKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>
+  ) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      logStudyEvent("undo", {
+        inconsistency_id: selectedInconsistencyIdRef.current,
+        source: "keyboard",
+      });
+    }
+    if (isFreeEditActive && event.key === "Enter") {
+      event.preventDefault();
+    }
+  }
+
+  function handleStudyClickCapture(event: React.MouseEvent<HTMLDivElement>) {
+    blockCompetingFreeEditInteraction(event);
+    if (event.defaultPrevented || !(event.target instanceof HTMLElement)) return;
+
+    const target = event.target;
+    const card = target.closest<HTMLElement>("[data-inconsistency-card-id]");
+    if (card) {
+      const inconsistencyId = card.dataset.inconsistencyCardId;
+      const button = target.closest<HTMLElement>("button, summary");
+      if (!inconsistencyId || !button) return;
+
+      const action = button.classList.contains("conflict-card-content") ? "selected"
+        : button.classList.contains("conflict-card-position-preview") ? "passage_opened"
+        : button.classList.contains("conflict-card-position-edit") ? "manual_edit_started"
+        : button.classList.contains("conflict-card-position-confirm") ? "passage_confirmed"
+        : button.classList.contains("resolved-inconsistency-button") ? "resolved"
+        : button.classList.contains("resolve-inconsistency-button") ? "visibility_toggled"
+        : button.closest(".suggestion-editor") ? "suggestion_editor_action"
+        : button.closest(".tracked-change-dialog") ? "tracked_change_action"
+        : "card_control_clicked";
+      startInconsistencyWork(inconsistencyId, "right_card");
+      logStudyEvent("card_interaction", {
+        inconsistency_id: inconsistencyId,
+        action,
+      });
+      return;
+    }
+
+    const marker = target.closest<HTMLElement>("[data-inconsistency-ids]");
+    if (marker && marker.dataset.inconsistencyRole !== "sentence") {
+      const inconsistencyId = (
+        marker.dataset.conflictInconsistencyIds ?? marker.dataset.inconsistencyIds ?? ""
+      ).split(" ").find(Boolean);
+      if (!inconsistencyId) return;
+      logStudyEvent("editor_marker_clicked", {
+        inconsistency_id: inconsistencyId,
+        role: marker.dataset.inconsistencyRole ?? "unknown",
+      });
+      startInconsistencyWork(inconsistencyId, "editor_marker");
+    }
+  }
+
+  function getStudyHoverTarget(target: EventTarget | null): {
+    element: HTMLElement;
+    inconsistencyId: string;
+    source: "editor_marker" | "left_navigation";
+    page?: number;
+  } | null {
+    if (!(target instanceof HTMLElement)) return null;
+
+    const navigationMarker = target.closest<HTMLElement>("[data-study-navigation-marker]");
+    if (navigationMarker) {
+      const index = Number(navigationMarker.dataset.studyInconsistencyIndex);
+      const inconsistencyId = Number.isInteger(index) ? navigationItems[index]?.id : undefined;
+      if (!inconsistencyId) return null;
+      return {
+        element: navigationMarker,
+        inconsistencyId,
+        source: "left_navigation",
+        page: Number(navigationMarker.dataset.studyPage),
+      };
+    }
+
+    const editorMarker = target.closest<HTMLElement>("[data-inconsistency-ids]");
+    if (!editorMarker || editorMarker.dataset.inconsistencyRole === "sentence") return null;
+    const inconsistencyId = (
+      editorMarker.dataset.conflictInconsistencyIds ?? editorMarker.dataset.inconsistencyIds ?? ""
+    ).split(" ").find(Boolean);
+    if (!inconsistencyId) return null;
+    return {
+      element: editorMarker,
+      inconsistencyId,
+      source: "editor_marker",
+    };
+  }
+
+  function handleStudyPointerOver(event: React.PointerEvent<HTMLDivElement>) {
+    const target = getStudyHoverTarget(event.target);
+    if (!target || target.element.contains(event.relatedTarget as Node | null)) return;
+    if (studyHoverStartsRef.current.has(target.element)) return;
+    studyHoverStartsRef.current.set(target.element, {
+      startedAt: performance.now(),
+      inconsistencyId: target.inconsistencyId,
+      source: target.source,
+      page: target.page,
+    });
+  }
+
+  function handleStudyPointerOut(event: React.PointerEvent<HTMLDivElement>) {
+    const target = getStudyHoverTarget(event.target);
+    if (!target || target.element.contains(event.relatedTarget as Node | null)) return;
+    const started = studyHoverStartsRef.current.get(target.element);
+    if (!started) return;
+    studyHoverStartsRef.current.delete(target.element);
+    const durationMs = Math.round(performance.now() - started.startedAt);
+    if (durationMs < MIN_STUDY_HOVER_DURATION_MS) return;
+
+    logStudyEvent(
+      started.source === "left_navigation"
+        ? "navigation_marker_hovered"
+        : "editor_marker_hovered",
+      {
+        inconsistency_id: started.inconsistencyId,
+        duration_ms: durationMs,
+        ...(started.page === undefined ? {} : { page: started.page }),
+      }
+    );
+  }
+
   return (
     <div
       className={`content-container${isFreeEditActive ? " content-container--free-edit-locked" : ""}`}
       onPointerDownCapture={blockCompetingFreeEditInteraction}
-      onClickCapture={blockCompetingFreeEditInteraction}
+      onPointerOverCapture={handleStudyPointerOver}
+      onPointerOutCapture={handleStudyPointerOut}
+      onClickCapture={handleStudyClickCapture}
       onKeyDownCapture={blockCompetingFreeEditInteraction}
     >
       <div className="editor-navigation-container">
@@ -4167,11 +4512,16 @@ function deserialize(
                   getStableInconsistencyId(inconsistency)
                 )
               );
+              const unresolvedCharacterInconsistencies = characterInconsistencies.filter(
+                (inconsistency) => !resolvedInconsistencyIdsRef.current.has(
+                  getStableCharacterInconsistencyId(inconsistency)
+                )
+              );
               setInconsistentPaths(
                 [
                   ...getInconsistentPaths(editor, unresolvedInconsistencies),
                   ...getCharacterInconsistentPaths(
-                    characterInconsistencies,
+                    unresolvedCharacterInconsistencies,
                     unresolvedInconsistencies.length
                   ),
                 ]
@@ -4209,7 +4559,7 @@ function deserialize(
               });
               const recalculatedRanges = [
                 ...getInconsistentTextRanges(editor, unresolvedInconsistencies),
-                ...getCharacterInconsistentTextRanges(editor, characterInconsistencies),
+                ...getCharacterInconsistentTextRanges(editor, unresolvedCharacterInconsistencies),
                 ...dependentRanges,
               ];
               const freeEditId = freeEditInconsistencyIdRef.current;
@@ -4275,7 +4625,7 @@ function deserialize(
         >
           {isFreeEditActive && (
             <div className="free-edit-checkbar" role="status">
-              <span>Edit the selected passages directly in the document, then run the consistency check.</span>
+              <span>Edit the selected passages directly in the document. Paragraph breaks are disabled during this step.</span>
               <button type="button" onClick={checkFreeChanges} disabled={analyzing}>
                 {analyzing
                   ? "Checking…"
@@ -4302,9 +4652,13 @@ function deserialize(
               hiddenInconsistencyIds: effectiveHiddenInconsistencyIds,
               transitionHiddenInconsistencyIds,
               successfulInconsistencyId,
+              finalizingChangeIds,
+              finalizingInsertionOnlyChangeIds,
+              visibleConfirmedChangeIds,
               onConflictHoverChange: handleInconsistencyHover,
             })}
             decorate={decorateInconsistencies}
+            onKeyDown={handleFreeEditEditorKeyDown}
             spellCheck
             />
           </div>
@@ -4386,7 +4740,7 @@ function deserialize(
                   key={marker.index}
                   direction="above"
                   marker={marker}
-                  onClick={() => focusInconsistency(marker.index, true, false)}
+                  onClick={() => focusInconsistency(marker.index, true, false, "editor_offscreen_marker")}
                 />
               ))}
             </div>
@@ -4398,7 +4752,7 @@ function deserialize(
                   key={marker.index}
                   direction="below"
                   marker={marker}
-                  onClick={() => focusInconsistency(marker.index, true, false)}
+                  onClick={() => focusInconsistency(marker.index, true, false, "editor_offscreen_marker")}
                 />
               ))}
             </div>
@@ -4523,8 +4877,9 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-preview"
                       onClick={() => navigateToAffectedPosition(inconsistency, position)}
+                      title={position.previewText ?? Editor.string(editor, position.range)}
                     >
-                      {position.previewText ?? formatFactStatement(position.fact)}
+                      {position.previewText ?? Editor.string(editor, position.range)}
                     </button>
                     <button
                       type="button"
@@ -5242,6 +5597,9 @@ function renderLeaf({
   hiddenInconsistencyIds,
   transitionHiddenInconsistencyIds,
   successfulInconsistencyId,
+  finalizingChangeIds,
+  finalizingInsertionOnlyChangeIds,
+  visibleConfirmedChangeIds,
   onConflictHoverChange,
 }: any) {
   const roleInconsistencyIds: string[] =
@@ -5272,13 +5630,13 @@ function renderLeaf({
   const belongsToActiveSentence =
     activeInconsistencyId !== null &&
     leaf.sentenceInconsistencyIds?.includes(activeInconsistencyId);
+  const isSuccessful = successfulInconsistencyId !== null &&
+    leaf.inconsistencyIds?.includes(successfulInconsistencyId);
   const renderAsActiveSentence =
-    belongsToActiveSentence && !belongsToActiveScope;
+    belongsToActiveSentence && !belongsToActiveScope && !isSuccessful;
   const suppressJitter = leaf.inconsistencyIds?.some(
     (id: string) => jitterSuppressedIds.has(id)
   );
-  const isSuccessful = successfulInconsistencyId !== null &&
-    leaf.inconsistencyIds?.includes(successfulInconsistencyId);
   if (leaf.bold) {
     children = <strong>{children}</strong>;
   }
@@ -5297,7 +5655,11 @@ function renderLeaf({
     children = <ins className={`tracked-insertion${leaf.changeAccepted ? " tracked-insertion--accepted" : ""}`}>{children}</ins>;
   }
 
-  if (leaf.confirmedCorrect) {
+  if (
+    leaf.confirmedCorrect &&
+    leaf.changeId &&
+    visibleConfirmedChangeIds.has(leaf.changeId)
+  ) {
     children = <mark className="confirmed-correct-passage">{children}</mark>;
   }
 
@@ -5351,10 +5713,12 @@ function renderLeaf({
           ? visibleRoleInconsistencyIds.join(" ") || undefined
           : undefined
       }
-      className={
+      className={[
         leaf.suggestionPreview
           ? "sentence-suggestion-preview"
           : isHidden
+          ? undefined
+          : isSuccessful && leaf.inconsistencyRole !== "conflict"
           ? undefined
           : renderAsActiveSentence
           ? [
@@ -5402,8 +5766,14 @@ function renderLeaf({
                     : "",
                   transitionClass,
                 ].filter(Boolean).join(" ")
-              : undefined
-      }
+              : undefined,
+        leaf.changeId && finalizingChangeIds.has(leaf.changeId)
+          ? "tracked-change-finalizing"
+          : "",
+        leaf.changeId && finalizingInsertionOnlyChangeIds.has(leaf.changeId)
+          ? "tracked-change-finalizing--insertion-only"
+          : "",
+      ].filter(Boolean).join(" ") || undefined}
       onMouseEnter={
         (leaf.inconsistencyRole === "conflict" || leaf.inconsistencyRole === "context") && !isHidden
           ? () => onConflictHoverChange(visibleRoleInconsistencyIds[0] ?? null)

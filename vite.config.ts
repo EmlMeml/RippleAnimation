@@ -8,5 +8,5 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset()] })
   ],
-  base: '/RippleAnimation/',
+  base: process.env.VITE_BASE_PATH ?? '/RippleAnimation/',
 })

@@ -113,11 +113,15 @@
 }
 
 .editor h1 {
-  font-size: 2rem;
+  margin: .35em 0 .3em;
+  color: #252b45;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .editor p {
-  margin: 0 0 1em;
+  margin: 0 0 1.25em;
 }
 
 .editor .inconsistent-text {
@@ -1773,7 +1777,9 @@
 
 .tracked-change-finalizing .tracked-deletion {
   display: inline-block;
-  max-width: var(--tracked-deletion-width, 30em);
+  width: var(--tracked-deletion-width, 30em);
+  min-width: 0;
+  max-width: none;
   animation: tracked-change-wipe-old 760ms cubic-bezier(.45, .05, .55, .95) forwards;
   overflow: hidden;
   vertical-align: bottom;
@@ -1785,8 +1791,35 @@
   position: relative;
   isolation: isolate;
   background-color: transparent;
-  background-image: none;
+  background-image: linear-gradient(rgb(187 247 208 / 72%), rgb(187 247 208 / 72%));
+  background-position: right center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   box-shadow: none;
+  animation: tracked-change-green-background-out 620ms ease-out 780ms forwards !important;
+}
+
+.tracked-change-finalizing .tracked-insertion {
+  opacity: 1;
+  clip-path: none;
+  transform: none;
+}
+
+/* The outer inconsistency leaf also carries a persistent green success fill.
+   During finalization only the inner tracked/confirmed mark may paint green,
+   otherwise that second layer remains visible behind the wipe animation. */
+.editor .tracked-change-finalizing.inconsistency-mark--success {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline-color: transparent !important;
+  animation: none !important;
+}
+
+.editor .tracked-change-finalizing {
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  outline-color: transparent !important;
 }
 
 .tracked-change-finalizing .tracked-insertion::after,
@@ -1804,19 +1837,24 @@
   animation: tracked-change-settle-new 620ms ease-out 780ms forwards;
 }
 
+.tracked-change-finalizing--insertion-only .tracked-insertion::after,
+.tracked-change-finalizing--insertion-only .confirmed-correct-passage::after {
+  animation-delay: 0ms;
+}
+
+.tracked-change-finalizing--insertion-only .tracked-insertion,
+.tracked-change-finalizing--insertion-only .confirmed-correct-passage {
+  animation-delay: 0ms !important;
+}
+
 @keyframes tracked-change-wipe-old {
   from {
-    max-width: var(--tracked-deletion-width, 30em);
+    width: var(--tracked-deletion-width, 30em);
     opacity: .68;
     clip-path: inset(0 0 0 0);
   }
-  78% {
-    max-width: var(--tracked-deletion-width, 30em);
-    opacity: 0;
-    clip-path: inset(0 0 0 100%);
-  }
   100% {
-    max-width: 0;
+    width: 0;
     opacity: 0;
     clip-path: inset(0 0 0 100%);
   }
@@ -1825,6 +1863,11 @@
 @keyframes tracked-change-settle-new {
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
+}
+
+@keyframes tracked-change-green-background-out {
+  from { background-size: 100% 100%; }
+  to { background-size: 0 100%; }
 }
 
 .tracked-change-card--accepted {
