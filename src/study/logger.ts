@@ -62,7 +62,7 @@ function getParticipantCode(): string | null {
 function endpointConfig() {
   const url = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
   const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  return url && key ? { endpoint: `${url}/rest/v1/study_events`, key } : null;
+  return url && key ? { endpoint: `${url}/functions/v1/log-study-events`, key } : null;
 }
 
 function scheduleFlush() {
@@ -130,9 +130,7 @@ export async function flushStudyEvents(): Promise<void> {
       method: "POST",
       headers: {
         apikey: config.key,
-        Authorization: `Bearer ${config.key}`,
         "Content-Type": "application/json",
-        Prefer: "return=minimal",
       },
       body: JSON.stringify(batch),
       keepalive: true,
