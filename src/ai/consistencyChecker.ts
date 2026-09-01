@@ -262,6 +262,93 @@ function getInconsistencyKey(
   ].join("|");
 }
 
+function displayValue(value: unknown): string {
+  const text = String(value ?? "").replaceAll("_", " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "an unknown value";
+}
+
+function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
+}
+
+function formatValueList(values: string[]): string {
+  if (values.length <= 2) {
+    return values.join(" and ");
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function formatUserFacingMessage(inconsistency: Inconsistency): string {
+  const subject = displayValue(inconsistency.subject);
+  const values = Array.from(new Set(
+    inconsistency.facts
+      .map((fact) => fact.object ?? fact.value)
+      .filter((value) => value !== undefined && value !== null)
+      .map(displayValue)
+  ));
+  const [firstValue, secondValue] = values;
+
+  if (inconsistency.category === "self_relation") {
+    const relationship: Partial<Record<Predicate, string>> = {
+      sibling_of: "sibling",
+      friend_of: "friend",
+      married_to: "spouse",
+      parent_of: "parent",
+      child_of: "child",
+    };
+
+    return `${subject} is incorrectly described as their own ${relationship[inconsistency.predicate as Predicate] ?? "relation"}.`;
+  }
+
+  if (inconsistency.category === "opposing_relation") {
+    return `${subject} is described as both younger and older than ${firstValue}.`;
+  }
+
+  if (inconsistency.category === "transitive_cycle") {
+    return `${possessive(subject)} ${displayValue(inconsistency.predicate)} relationships form an impossible cycle.`;
+  }
+
+  if (inconsistency.category === "indirect_age_conflict") {
+    return `${possessive(subject)} age relationships create an indirect contradiction.`;
+  }
+
+  if (inconsistency.category === "age_value_conflict") {
+    return `${possessive(subject)} stated age conflicts with the described age relationship.`;
+  }
+
+  if (inconsistency.category === "inverse_relation") {
+    return `${subject} is assigned mutually incompatible relationships involving ${firstValue}.`;
+  }
+
+  if (values.length > 2) {
+    return `${possessive(subject)} ${displayValue(inconsistency.predicate)} has conflicting values: ${formatValueList(values)}.`;
+  }
+
+  if (firstValue && secondValue) {
+    switch (inconsistency.predicate) {
+      case "age":
+        return `${possessive(subject)} age changes from ${firstValue} to ${secondValue}.`;
+      case "occupation":
+        return `${possessive(subject)} occupation changes from ${firstValue} to ${secondValue}.`;
+      case "works_at":
+        return `${subject} is associated with both ${firstValue} and ${secondValue} as workplaces during the same period.`;
+      case "lives_in":
+        return `${subject} is said to live in both ${firstValue} and ${secondValue} at the same time.`;
+      case "born_in":
+        return `${possessive(subject)} birthplace changes from ${firstValue} to ${secondValue}.`;
+      case "located_in":
+        return `${subject} is placed in both ${firstValue} and ${secondValue}.`;
+      case "gender":
+        return `${possessive(subject)} gender is described as both ${firstValue} and ${secondValue}.`;
+      default:
+        return `${subject} has conflicting ${displayValue(inconsistency.predicate)} information: ${firstValue} and ${secondValue}.`;
+    }
+  }
+
+  return inconsistency.message;
+}
+
 /**
  * Ordnet einer Inkonsistenz eine konsistente, erklärbare Bewertung zu.
  * Die Bewertung ist bewusst heuristisch: Sie bewertet die potenzielle
@@ -619,6 +706,22 @@ function areLocatedInValuesCompatible(
   return false;
 }
 
+function isSequentialImplicitLocationChange(factA: Fact, factB: Fact): boolean {
+  if (
+    factA.temporal?.source !== "implicit" ||
+    factB.temporal?.source !== "implicit"
+  ) {
+    return false;
+  }
+
+  const paragraphA = factA.source?.paragraphIndex;
+  const paragraphB = factB.source?.paragraphIndex;
+
+  // Separate narrative paragraphs establish successive scene states unless
+  // the text explicitly anchors both locations to the same time.
+  return paragraphA !== undefined && paragraphB !== undefined && paragraphA !== paragraphB;
+}
+
 /* function isImplicitTemporalFact(fact: Fact): boolean {
   return fact.temporal?.source === "implicit";
 }
@@ -653,9 +756,7 @@ function checkExclusiveFacts(
       ).values()
     );
 
-    /*
-     * Nach Subjekt gruppieren.
-     */
+    /* Nach Subjekt gruppieren. */
     const grouped = new Map<
       string,
       Fact[]
@@ -677,12 +778,16 @@ function checkExclusiveFacts(
     }
 
     /*
-     * Facts desselben Subjekts miteinander vergleichen.
+     * Facts desselben Subjekts miteinander vergleichen. Konfliktpaare werden
+     * anschließend zu zusammenhängenden Gruppen verbunden. So bilden etwa
+     * teacher ↔ technician und teacher ↔ nurse nur eine Inkonsistenz.
      */
     for (const [
       subject,
       subjectFacts,
     ] of grouped) {
+      const conflictPairs: Array<[Fact, Fact]> = [];
+
       for (
         let i = 0;
         i < subjectFacts.length;
@@ -732,6 +837,10 @@ function checkExclusiveFacts(
             ) {
               continue;
             }
+
+            if (isSequentialImplicitLocationChange(factA, factB)) {
+              continue;
+            }
           }
 
          /*
@@ -766,20 +875,72 @@ function checkExclusiveFacts(
             continue;
           }
 
-          inconsistencies.push({
-            type: "conflicting_fact",
-            category: "exclusive_fact",
-            subject,
-            predicate,
-            facts: [
-              factA,
-              factB,
-            ],
-            message:
-              `${subject} has conflicting information for ` +
-              `"${predicate}".`,
-          });
+          conflictPairs.push([factA, factB]);
         }
+      }
+
+      const adjacency = new Map<string, Set<string>>();
+      const factsByKey = new Map(subjectFacts.map((fact) => [getFactKey(fact), fact]));
+
+      for (const [factA, factB] of conflictPairs) {
+        const keyA = getFactKey(factA);
+        const keyB = getFactKey(factB);
+        const neighborsA = adjacency.get(keyA) ?? new Set<string>();
+        const neighborsB = adjacency.get(keyB) ?? new Set<string>();
+        neighborsA.add(keyB);
+        neighborsB.add(keyA);
+        adjacency.set(keyA, neighborsA);
+        adjacency.set(keyB, neighborsB);
+      }
+
+      const visited = new Set<string>();
+
+      for (const startKey of adjacency.keys()) {
+        if (visited.has(startKey)) {
+          continue;
+        }
+
+        const componentKeys = new Set<string>();
+        const pending = [startKey];
+
+        while (pending.length > 0) {
+          const currentKey = pending.pop()!;
+          if (visited.has(currentKey)) {
+            continue;
+          }
+
+          visited.add(currentKey);
+          componentKeys.add(currentKey);
+          pending.push(...(adjacency.get(currentKey) ?? []));
+        }
+
+        const componentFacts = extraction.facts.filter(
+          (fact) =>
+            fact.predicate === predicate &&
+            normalizeValue(fact.subject) === subject &&
+            componentKeys.has(getFactKey(fact))
+        );
+
+        if (componentFacts.length < 2) {
+          continue;
+        }
+
+        /* factsByKey stellt sicher, dass jede Komponente echte Konfliktwerte
+         * enthält; componentFacts bewahrt zusätzlich alle Textvorkommen. */
+        if (Array.from(componentKeys).some((key) => !factsByKey.has(key))) {
+          continue;
+        }
+
+        inconsistencies.push({
+          type: "conflicting_fact",
+          category: "exclusive_fact",
+          subject,
+          predicate,
+          facts: componentFacts,
+          message:
+            `${subject} has conflicting information for ` +
+            `"${predicate}".`,
+        });
       }
     }
   }
@@ -1644,7 +1805,10 @@ export function checkConsistency(
     }
   }
 
-  return Array.from(unique.values()).map(
-    assessInconsistency
+  return Array.from(unique.values()).map((inconsistency) =>
+    assessInconsistency({
+      ...inconsistency,
+      message: formatUserFacingMessage(inconsistency),
+    })
   );
 }

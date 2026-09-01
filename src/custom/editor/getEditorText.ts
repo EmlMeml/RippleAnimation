@@ -1,21 +1,13 @@
-import type { Descendant } from "slate";
+import { Text, type Descendant } from "slate";
+
+function getNodeText(node: Descendant): string {
+  if (Text.isText(node)) {
+    return node.changeType === "deletion" ? "" : node.text;
+  }
+
+  return node.children.map(getNodeText).join("");
+}
 
 export function getEditorText(nodes: Descendant[]): string {
-  return nodes
-    .map((node) => {
-      if ("children" in node) {
-        return node.children
-          .map((child) => {
-            if ("text" in child) {
-              return child.text;
-            }
-
-            return "";
-          })
-          .join("");
-      }
-
-      return "";
-    })
-    .join("\n");
+  return nodes.map(getNodeText).join("\n");
 }

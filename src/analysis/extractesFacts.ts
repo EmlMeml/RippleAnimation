@@ -3,6 +3,7 @@ import type { StoryContext } from "../types/story";
 import { askAI } from "./../ai/api";
 import { normalizeTemporal } from "./temporalNormalizer";
 import { resolvePronouns } from "./pronounResolver";
+import { addMissingExplicitAgeFacts } from "./explicitAgeFacts";
 
 const MAX_CHUNK_WORDS = 1500;
 const MAX_CHUNK_RETRIES = 2;
@@ -320,6 +321,35 @@ physical/location relationship of an entity, for example:
   "object": "munich"
 }
 
+CONTAINMENT VS. LANDMARKS AND PROXIMITY
+"located_in" means geographic containment: the subject is inside the object
+(for example, a town in a country or a building in a city). Do NOT use
+"located_in" for a nearby landmark, geographic feature, direction, or relative
+position. Expressions such as "at the foot of", "near", "beside", "next to",
+"overlooking", "north of", "am Fuße von", "nahe", "neben", and "nördlich von"
+do not state containment and must not create a located_in fact.
+
+You may still extract the mentioned landmark as a place entity, but do not
+connect it with located_in unless the text separately and explicitly states a
+containment relationship.
+
+Example:
+"Ort A liegt in Land B am Fuße des Berges C."
+Return the place entities Ort A, Land B, and Berg C, but return only this
+location fact:
+{
+  "subject": "ort_a",
+  "predicate": "located_in",
+  "object": "land_b"
+}
+Do NOT return ort_a located_in berg_c. "Am Fuße des Berges C" is a landmark
+description, not a second container.
+
+Example:
+"Village A is in Country B near Mountain C."
+Return village_a located_in country_b. Mountain C may be a place entity, but
+do NOT return village_a located_in mountain_c.
+
 PREDICATE RULE FOR RESIDENCE
 If a person lives, resides, or lives at a place,
 always use "lives_in".
@@ -597,6 +627,7 @@ export async function extractFacts(
   const extraction = resolvePronouns(
     mergeExtractions(chunkExtractions)
   );
+  extraction.facts = addMissingExplicitAgeFacts(text, extraction.entities, extraction.facts);
   console.log("nach askAI | vor orderFacts");
   const orderedFacts = [...extraction.facts].sort(
     (a, b) =>

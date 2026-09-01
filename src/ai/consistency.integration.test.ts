@@ -12,6 +12,37 @@ describe("Integration – Fact Extraction + Consistency Check", () => {
     referenceDate: "2026-08-14",
   };
 
+  it("weist Landmarken am Fuß eines Berges nicht als zweiten Standort aus", async () => {
+    vi.mocked(askAI).mockResolvedValue({
+      entities: [
+        { id: "ort_a", name: "Ort A", type: "place" },
+        { id: "land_b", name: "Land B", type: "place" },
+        { id: "berg_c", name: "Berg C", type: "place" },
+      ],
+      facts: [
+        { subject: "ort_a", predicate: "located_in", object: "land_b" },
+      ],
+    });
+
+    const extraction = await extractFacts(
+      "Ort A liegt in Land B am Fuße des Berges C.",
+      context
+    );
+    const prompt = String(vi.mocked(askAI).mock.calls.at(-1)?.[0] ?? "");
+
+    expect(prompt).toContain("CONTAINMENT VS. LANDMARKS AND PROXIMITY");
+    expect(prompt).toContain("Do NOT return ort_a located_in berg_c");
+    expect(extraction.entities).toHaveLength(3);
+    expect(extraction.facts).toEqual([
+      expect.objectContaining({
+        subject: "ort_a",
+        predicate: "located_in",
+        object: "land_b",
+      }),
+    ]);
+    expect(checkConsistency(extraction)).toEqual([]);
+  });
+
   it("erkennt einen zeitlichen Widerspruch nach der Fact-Extraktion", async () => {
     vi.mocked(askAI).mockResolvedValue({
       entities: [

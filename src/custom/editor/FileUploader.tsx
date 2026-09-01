@@ -71,7 +71,7 @@ export default function FileUploader({ onTextLoad,onHtmlLoad }: FileUploaderProp
       <label
         className='fileUploadBtn'
       >
-        <UploadFileIcon style={{ color: '#2b311c' }} />
+        <UploadFileIcon style={{ color: '#252b45' }} />
         Upload File
         <input
           type="file"
