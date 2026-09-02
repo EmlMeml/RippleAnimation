@@ -623,8 +623,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const freeEditDocumentSnapshotRef = useRef<string[]>([]);
   const freeEditDocumentNodesSnapshotRef = useRef<Descendant[]>([]);
   const freeEditInconsistencyIdRef = useRef<string | null>(null);
-  const localEditMarkerHideTimeoutRef = useRef<number | null>(null);
   const [localEditMarker, setLocalEditMarker] = useState<LocalEditMarkerState | null>(null);
+  const localEditMarkerRef = useRef<LocalEditMarkerState | null>(null);
   const [verifiedMarkerResults, setVerifiedMarkerResults] =
     useState<Map<string, VerifiedMarkerResult>>(() => new Map());
   const [successfulInconsistencyId, setSuccessfulInconsistencyId] =
@@ -641,6 +641,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   const [analyzing, setAnalyzing] = useState(false);
   const [incrementalRecheckActive, setIncrementalRecheckActive] = useState(false);
+  const [incrementalRecheckRanges, setIncrementalRecheckRanges] = useState<BaseRange[]>([]);
 
   const [, setAnalysisError] = useState("");
 
@@ -1167,6 +1168,23 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   }
 
   function handleInconsistencyHover(inconsistencyId: string | null) {
+    const editedInconsistencyId = freeEditInconsistencyIdRef.current;
+    if (editedInconsistencyId) {
+      // Focus mode is locked to the passage currently being edited. Merely
+      // crossing another decorated range must not replace its local marker.
+      const editedIndex = navigationItems.findIndex(
+        (item) => item.id === editedInconsistencyId
+      );
+      setHoveredNavigationInconsistencyIndex(editedIndex >= 0 ? editedIndex : null);
+      setActiveInconsistencyId(editedInconsistencyId);
+      return;
+    }
+
+    const hoveredIndex = inconsistencyId
+      ? navigationItems.findIndex((item) => item.id === inconsistencyId)
+      : -1;
+    setHoveredNavigationInconsistencyIndex(hoveredIndex >= 0 ? hoveredIndex : null);
+
     if (inconsistencyId) {
       setJitterSuppressedIds((current) => {
         if (current.has(inconsistencyId)) {
@@ -1182,6 +1200,16 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     setActiveInconsistencyId(
       inconsistencyId ?? selectedInconsistencyIdRef.current
     );
+  }
+
+  function clearNavigationHoverState() {
+    setHoveredNavigationInconsistencyIndex(null);
+    if (navigationHoverTimeoutRef.current !== null) {
+      window.clearTimeout(navigationHoverTimeoutRef.current);
+      navigationHoverTimeoutRef.current = null;
+    }
+    navigationHoverTargetRef.current?.classList.remove("inconsistency-hover-locate");
+    navigationHoverTargetRef.current = null;
   }
 
   const updateOffscreenMarkers = useCallback(() => {
@@ -3172,7 +3200,8 @@ function deserialize(
 
   function beginFreeEditing(inconsistency: Inconsistency) {
     const restoreScrollPosition = captureEditorScrollPosition();
-    const selectedPositions = getAffectedFactPositions(inconsistency)
+    const allAffectedPositions = getAffectedFactPositions(inconsistency);
+    const selectedPositions = allAffectedPositions
       .filter((_, index) => selectedSuggestionFacts.has(index));
     const paragraphIndices = Array.from(new Set(
       selectedPositions
@@ -3189,6 +3218,17 @@ function deserialize(
       Editor.rangeRef(editor, range, { affinity: "outward" })
     );
     freeEditInconsistencyIdRef.current = getStableInconsistencyId(inconsistency);
+    setVerifiedMarkerResults((current) => {
+      const inconsistencyId = getStableInconsistencyId(inconsistency);
+      if (current.has(inconsistencyId)) return current;
+      const next = new Map(current);
+      next.set(inconsistencyId, {
+        occurrenceCount: allAffectedPositions.length,
+        change: "steady",
+        revision: 0,
+      });
+      return next;
+    });
     setFreeEditParagraphs(paragraphIndices);
     setFreeEditInconsistency(inconsistency);
     Transforms.select(editor, selectedPositions[0].range);
@@ -3217,6 +3257,19 @@ function deserialize(
       .filter((range) => range.anchor.path[0] === selectedEvidence.paragraphIndex)
       .map((range) => Editor.rangeRef(editor, range, { affinity: "outward" }));
     freeEditInconsistencyIdRef.current = getStableCharacterInconsistencyId(inconsistency);
+    setVerifiedMarkerResults((current) => {
+      const inconsistencyId = getStableCharacterInconsistencyId(inconsistency);
+      if (current.has(inconsistencyId)) return current;
+      const next = new Map(current);
+      next.set(inconsistencyId, {
+        occurrenceCount: inconsistency.evidence.filter((_, index) =>
+          !handledCharacterEvidenceKeys.has(`${inconsistencyId}:${index}`)
+        ).length,
+        change: "steady",
+        revision: 0,
+      });
+      return next;
+    });
     setFreeEditParagraphs(paragraphIndices);
     setFreeEditCharacterInconsistency(inconsistency);
     setFreeEditCharacterEvidenceIndices([evidenceIndex]);
@@ -3508,6 +3561,7 @@ function deserialize(
     }
 
     setIncrementalRecheckActive(true);
+    setIncrementalRecheckRanges(rememberedRanges);
     setAnalyzing(true);
     setAnalysisError("");
 
@@ -3597,12 +3651,43 @@ function deserialize(
           fact.source?.paragraphIndex !== undefined &&
           paragraphIndices.includes(fact.source.paragraphIndex)
         );
-        const successfulRanges = refreshedFacts.length > 0 && checkedInconsistency
+        const detectedSuccessfulRanges = refreshedFacts.length > 0 && checkedInconsistency
           ? getInconsistentTextRanges(editor, [{
               ...checkedInconsistency,
               facts: refreshedFacts,
             }], checkedId)
           : [];
+        const trackedResolutionRanges = trackedChanges
+          .filter((change) => getStableInconsistencyId(change.inconsistency) === checkedId)
+          .flatMap((change) => change.affectedRangeRefs.flatMap((rangeRef) => {
+            const range = rangeRef.current;
+            return range ? [range] : [];
+          }));
+        const successfulRangeCandidates: InconsistentTextRange[] = [
+          ...detectedSuccessfulRanges,
+          ...trackedResolutionRanges.map((range) => ({
+            ...range,
+            inconsistent: true as const,
+            inconsistencyRole: "conflict" as const,
+            inconsistencySeverity: checkedInconsistency?.severity,
+            inconsistencyIds: [checkedId],
+            conflictInconsistencyIds: [checkedId],
+          })),
+          ...rememberedRanges.map((range) => ({
+              ...range,
+              inconsistent: true as const,
+              inconsistencyRole: "conflict" as const,
+              inconsistencySeverity: checkedInconsistency?.severity,
+              inconsistencyIds: [checkedId],
+              conflictInconsistencyIds: [checkedId],
+            })),
+        ];
+        const successfulRanges = Array.from(new Map(
+          successfulRangeCandidates.map((range) => [
+            `${range.anchor.path.join(".")}:${range.anchor.offset}:${range.focus.path.join(".")}:${range.focus.offset}`,
+            range,
+          ])
+        ).values());
 
         setSuccessfulInconsistencyId(checkedId);
         successfulInconsistencyIdRef.current = checkedId;
@@ -3682,6 +3767,7 @@ function deserialize(
     } finally {
       setAnalyzing(false);
       setIncrementalRecheckActive(false);
+      setIncrementalRecheckRanges([]);
     }
   }
 
@@ -3694,6 +3780,7 @@ function deserialize(
     const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
       checkedInconsistency.evidence.length;
     setIncrementalRecheckActive(true);
+    setIncrementalRecheckRanges(rememberedRanges);
     setAnalyzing(true);
     setCharacterAnalysisError("");
 
@@ -3830,6 +3917,7 @@ function deserialize(
     } finally {
       setAnalyzing(false);
       setIncrementalRecheckActive(false);
+      setIncrementalRecheckRanges([]);
     }
   }
 
@@ -3865,7 +3953,10 @@ function deserialize(
   }
 
   function handleNavigationHighlightHover(highlight: NavigationTextHighlight | null) {
-    setHoveredNavigationInconsistencyIndex(highlight?.index ?? null);
+    const editedInconsistencyId = freeEditInconsistencyIdRef.current;
+    setHoveredNavigationInconsistencyIndex(
+      editedInconsistencyId ? null : highlight?.index ?? null
+    );
 
     if (navigationHoverTimeoutRef.current !== null) {
       window.clearTimeout(navigationHoverTimeoutRef.current);
@@ -3873,6 +3964,11 @@ function deserialize(
     }
     navigationHoverTargetRef.current?.classList.remove("inconsistency-hover-locate");
     navigationHoverTargetRef.current = null;
+
+    if (editedInconsistencyId) {
+      setActiveInconsistencyId(editedInconsistencyId);
+      return;
+    }
 
     if (!highlight) return;
     const inconsistencyId = navigationItems[highlight.index]?.id;
@@ -4439,6 +4535,13 @@ function deserialize(
       selectedInconsistencyIdRef.current = targetResolutionId;
       return;
     }
+
+    // Keep the verified marker green until the user explicitly confirms the
+    // resolution. The click starts its own short dismissal before the issue
+    // and its ranges are removed from the editor.
+    clearNavigationHoverState();
+    setLocalEditMarker((current) => current ? { ...current, visible: false } : current);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 320));
     finishInconsistencyWork("resolved");
     const resolutionChangeIds = new Set([
       ...trackedChanges
@@ -4493,6 +4596,7 @@ function deserialize(
     // A resolved card must no longer keep the editor in scoped/selected mode.
     // Clear this before Slate removes accepted nodes so adjacent decorations
     // cannot inherit a stale replay animation during the resulting render.
+    clearNavigationHoverState();
     setActiveInconsistencyId(null);
     setSelectedInconsistencyId(null);
     selectedInconsistencyIdRef.current = null;
@@ -4699,9 +4803,28 @@ function deserialize(
   const isFreeEditActive = Boolean(
     freeEditInconsistency || freeEditCharacterInconsistency
   );
+
+  useEffect(() => {
+    localEditMarkerRef.current = localEditMarker;
+  }, [localEditMarker]);
+
+  useEffect(() => {
+    if (!isFreeEditActive) return;
+    setHoveredNavigationInconsistencyIndex(null);
+    const editedInconsistencyId = freeEditInconsistencyIdRef.current;
+    if (editedInconsistencyId) setActiveInconsistencyId(editedInconsistencyId);
+  }, [isFreeEditActive]);
+
   const updateLocalEditMarker = useCallback(() => {
     if (!activeInconsistencyId) {
       setLocalEditMarker(null);
+      return;
+    }
+
+    // While the check is running, the spinner belongs to the passage the user
+    // just edited. Do not reposition it to another remembered/check range
+    // until the evaluation has produced its result.
+    if (incrementalRecheckActive && localEditMarkerRef.current?.markers.length) {
       return;
     }
 
@@ -4720,26 +4843,78 @@ function deserialize(
       const activeCharacterInconsistency = characterInconsistencies.find(
         (item) => getStableCharacterInconsistencyId(item) === activeInconsistencyId
       );
-      const sourceRanges: BaseRange[] = activeFactInconsistency
-        ? getAffectedFactPositions(activeFactInconsistency).map(({ range }) => range)
+      const initialOccurrenceCount = activeFactInconsistency
+        ? getAffectedFactPositions(activeFactInconsistency).length
         : activeCharacterInconsistency
-          ? getCharacterInconsistentTextRanges(editor, [activeCharacterInconsistency])
-          : [];
+          ? activeCharacterInconsistency.evidence.filter((_, evidenceIndex) =>
+              !handledCharacterEvidenceKeys.has(
+                `${activeInconsistencyId}:${evidenceIndex}`
+              )
+            ).length
+          : 0;
+      const resolvedDisplayRanges = result?.change === "resolved" &&
+        successfulInconsistencyIdRef.current === activeInconsistencyId
+        ? successfulRangesRef.current.filter((range) =>
+            range.inconsistencyIds.includes(activeInconsistencyId)
+          )
+        : [];
+      const focusedEditRanges = isFreeEditActive &&
+        freeEditInconsistencyIdRef.current === activeInconsistencyId
+        ? freeEditRangeRefs.current.flatMap((rangeRef) => {
+            const range = rangeRef.current;
+            return range ? [range] : [];
+          })
+        : [];
+      const sourceRanges: BaseRange[] = resolvedDisplayRanges.length > 0
+        ? resolvedDisplayRanges
+        : incrementalRecheckActive && incrementalRecheckRanges.length > 0
+        ? incrementalRecheckRanges
+        : focusedEditRanges.length > 0
+          ? focusedEditRanges
+          : activeFactInconsistency
+            ? getAffectedFactPositions(activeFactInconsistency).map(({ range }) => range)
+            : activeCharacterInconsistency
+              ? getCharacterInconsistentTextRanges(editor, [activeCharacterInconsistency])
+              : [];
+      // A single passage may span several Slate leaves after typing or after
+      // staging the old/new diff. It still owns only one local marker. Distinct
+      // passages normally live in distinct paragraph blocks.
+      const markerSourceRanges = result?.change === "resolved"
+        ? sourceRanges
+        : sourceRanges.filter((range, rangeIndex, ranges) =>
+            ranges.findIndex((candidate) => candidate.anchor.path[0] === range.anchor.path[0]) === rangeIndex
+          );
       const elements = Array.from(scrollContainer.querySelectorAll<HTMLElement>(
         `[data-inconsistency-ids~="${activeInconsistencyId}"]`
       )).filter((element) => element.dataset.inconsistencyRole !== "sentence");
       const seen = new Set<string>();
-      const rangeMarkers = sourceRanges.flatMap((range, rangeIndex) => {
+      const resolvedMarkerTops: number[] = [];
+      const rangeMarkers = markerSourceRanges.flatMap((range, rangeIndex) => {
         try {
           const passageDomRange = ReactEditor.toDOMRange(editor, range);
           const passageRects = Array.from(passageDomRange.getClientRects());
-          const passageRect = passageRects[0] ?? passageDomRange.getBoundingClientRect();
+          // At a soft wrap Chromium can return a zero-width caret rectangle at
+          // the end of the previous line before the rectangles that actually
+          // paint the range. Pick the upper-left painted rectangle explicitly.
+          const paintedPassageRects = passageRects
+            .filter((rect) => rect.width > 1 && rect.height > 1)
+            .sort((first, second) =>
+              Math.abs(first.top - second.top) > 1
+                ? first.top - second.top
+                : first.left - second.left
+            );
+          const passageRect = paintedPassageRects[0] ?? passageDomRange.getBoundingClientRect();
           if (passageRect.bottom < viewport.top || passageRect.top > viewport.bottom) return [];
           // The first painted line rectangle is more reliable than a collapsed
           // DOM range at the anchor. At a soft wrap browsers often report that
           // collapsed point at the end of the preceding visual line.
           const x = passageRect.left - shellRect.left;
           const y = passageRect.top - shellRect.top;
+          if (
+            result?.change === "resolved" &&
+            resolvedMarkerTops.some((existingTop) => Math.abs(existingTop - y) < 8)
+          ) return [];
+          if (result?.change === "resolved") resolvedMarkerTops.push(y);
           const positionKey = `${Math.round(x)}:${Math.round(y)}`;
           if (seen.has(positionKey)) return [];
           seen.add(positionKey);
@@ -4772,6 +4947,9 @@ function deserialize(
         }];
       });
       let markers = rangeMarkers.length > 0 ? rangeMarkers : elementMarkers;
+      if (isFreeEditActive) {
+        markers = markers.filter((marker) => marker.active);
+      }
       if (markers.length === 0 && isFreeEditActive && editor.selection) {
         try {
           const caretDomRange = ReactEditor.toDOMRange(
@@ -4800,43 +4978,37 @@ function deserialize(
         return;
       }
 
+      if (markers.length === 0 && result?.change === "resolved") {
+        setLocalEditMarker((current) => current ? {
+          ...current,
+          occurrenceCount: 0,
+          change: "resolved",
+          visible: true,
+        } : current);
+        return;
+      }
+
       if (markers.length === 0) {
         setLocalEditMarker(null);
         return;
       }
 
-      if (localEditMarkerHideTimeoutRef.current !== null) {
-        window.clearTimeout(localEditMarkerHideTimeoutRef.current);
-        localEditMarkerHideTimeoutRef.current = null;
-      }
-
       setLocalEditMarker({
         markers,
-        occurrenceCount: result?.occurrenceCount ?? markers.length,
+        occurrenceCount: result?.occurrenceCount ?? initialOccurrenceCount,
         change: result?.change ?? "steady",
         visible: true,
       });
 
-      if (result?.change === "resolved") {
-        localEditMarkerHideTimeoutRef.current = window.setTimeout(() => {
-          setLocalEditMarker((current) => current ? { ...current, visible: false } : current);
-        }, 420);
-      }
     } catch {
       if (!incrementalRecheckActive) setLocalEditMarker(null);
     }
-  }, [activeInconsistencyId, characterInconsistencies, editor, incrementalRecheckActive, inconsistencies, isFreeEditActive, verifiedMarkerResults]);
+  }, [activeInconsistencyId, characterInconsistencies, editor, handledCharacterEvidenceKeys, incrementalRecheckActive, incrementalRecheckRanges, inconsistencies, isFreeEditActive, verifiedMarkerResults]);
 
   useEffect(() => {
     const animationFrame = window.requestAnimationFrame(updateLocalEditMarker);
     return () => window.cancelAnimationFrame(animationFrame);
   }, [document, documentZoom, currentPage, inconsistentRanges, updateLocalEditMarker]);
-
-  useEffect(() => () => {
-    if (localEditMarkerHideTimeoutRef.current !== null) {
-      window.clearTimeout(localEditMarkerHideTimeoutRef.current);
-    }
-  }, []);
 
   function isAllowedDuringFreeEdit(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
@@ -5205,11 +5377,11 @@ function deserialize(
           {localEditMarker?.markers.map((marker, markerIndex) => (
             <span
               key={marker.key}
-              className={`local-edit-marker local-edit-marker--${localEditMarker.change}${marker.active ? " local-edit-marker--active" : ""}${localEditMarker.visible ? "" : " local-edit-marker--hidden"}`}
+              className={`local-edit-marker local-edit-marker--${localEditMarker.change}${marker.active ? " local-edit-marker--active" : ""}${localEditMarker.visible ? "" : " local-edit-marker--dismissing"}`}
               style={{
                 left: `${marker.x}px`,
                 top: `${marker.y}px`,
-                "--local-marker-size": `${Math.min(34, Math.max(16, 14 + localEditMarker.occurrenceCount * 4))}px`,
+                "--local-marker-size": `${Math.min(42, Math.max(28, 24 + localEditMarker.occurrenceCount * 4))}px`,
               } as React.CSSProperties}
               role={markerIndex === 0 ? "status" : undefined}
               aria-hidden={markerIndex === 0 ? undefined : true}
@@ -5218,7 +5390,11 @@ function deserialize(
                   ? "Inconsistency resolved"
                   : `${localEditMarker.occurrenceCount} inconsistent ${localEditMarker.occurrenceCount === 1 ? "passage" : "passages"}`
                 : undefined}
-            />
+            >
+              <span className="local-edit-marker-icon" aria-hidden="true">
+                {inconsistencyEmojiById.get(activeInconsistencyId ?? "") ?? "⚠️"}
+              </span>
+            </span>
           ))}
           {analyzing && !incrementalRecheckActive && (
             <div
