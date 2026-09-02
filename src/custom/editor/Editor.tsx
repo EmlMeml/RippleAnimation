@@ -1434,6 +1434,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     const scrollContainer = editorScrollRef.current;
     if (!scrollContainer || !activeInconsistencyId) return;
 
+    logStudyEvent("context_preview_clicked", {
+      inconsistency_id: activeInconsistencyId,
+      direction: preview.direction,
+      target_index: preview.targetIndex,
+      preview_key: preview.key,
+    });
+
     const targets = Array.from(
       scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
     ).filter((element) =>

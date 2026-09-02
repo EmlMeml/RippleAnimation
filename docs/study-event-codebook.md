@@ -15,6 +15,7 @@ This document defines the events and derived metrics used for the study data ana
 | `editor_marker_hovered` | An editor marker was hovered for at least 300 ms. | `inconsistency_id`, `duration_ms` |
 | `navigation_marker_clicked` | A marker in the left navigation was clicked. | `inconsistency_id`, `page`, `severity` |
 | `navigation_marker_hovered` | A left-navigation marker was hovered for at least 300 ms. | `inconsistency_id`, `page`, `duration_ms` |
+| `context_preview_clicked` | An off-screen context preview above or below the editor viewport was clicked. | `inconsistency_id`, `direction`, `target_index`, `preview_key` |
 | `card_interaction` | A relevant control inside a right-side inconsistency card was used. | `inconsistency_id`, `action` |
 | `inconsistency_work_started` | A timed work segment for one inconsistency began. | `inconsistency_id`, `work_session_id`, `source` |
 | `inconsistency_work_finished` | A timed work segment ended. | `inconsistency_id`, `work_session_id`, `outcome`, `duration_ms`, `interaction_count` |

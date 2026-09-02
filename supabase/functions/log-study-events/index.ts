@@ -14,6 +14,7 @@ const ALLOWED_EVENT_TYPES = new Set([
   "editor_marker_hovered",
   "navigation_marker_clicked",
   "navigation_marker_hovered",
+  "context_preview_clicked",
   "card_interaction",
   "inconsistency_work_started",
   "inconsistency_work_finished",

@@ -37,11 +37,15 @@ class StudyDataAnalysisTests(unittest.TestCase):
             self.event(2, "editor_marker_hovered", {
                 "inconsistency_id": "inconsistency-0", "duration_ms": 500,
             }),
-            self.event(3, "inconsistency_work_finished", {
+            self.event(3, "context_preview_clicked", {
+                "inconsistency_id": "inconsistency-0", "direction": "above",
+                "target_index": 0, "preview_key": "preview-0",
+            }),
+            self.event(4, "inconsistency_work_finished", {
                 "inconsistency_id": "inconsistency-0", "work_session_id": work_id,
                 "duration_ms": 2500, "outcome": "resolved", "interaction_count": 1,
             }),
-            self.event(4, "study_completed", {"outcome": "completed"}),
+            self.event(5, "study_completed", {"outcome": "completed"}),
         ]
         issues = []
         sessions, grouped = analysis.analyze_sessions(events, issues)
@@ -52,6 +56,11 @@ class StudyDataAnalysisTests(unittest.TestCase):
         self.assertEqual(2500, sessions[0]["total_work_ms"])
         self.assertEqual(2500, inconsistencies[0]["total_work_ms"])
         self.assertEqual(500, inconsistencies[0]["editor_marker_hover_ms"])
+        self.assertEqual(1, sessions[0]["context_preview_clicks"])
+        self.assertEqual(1, inconsistencies[0]["context_preview_clicks"])
+        self.assertEqual(
+            '{"above": 1}', inconsistencies[0]["context_preview_direction_counts_json"]
+        )
 
     def test_quality_checks_find_gaps_and_unpaired_work(self):
         events = [

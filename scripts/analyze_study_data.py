@@ -24,6 +24,7 @@ KNOWN_EVENTS = {
     "editor_marker_hovered",
     "navigation_marker_clicked",
     "navigation_marker_hovered",
+    "context_preview_clicked",
     "card_interaction",
     "inconsistency_work_started",
     "inconsistency_work_finished",
@@ -298,6 +299,7 @@ def analyze_sessions(
             "navigation_marker_clicks": counts["navigation_marker_clicked"],
             "editor_marker_hovers": counts["editor_marker_hovered"],
             "navigation_marker_hovers": counts["navigation_marker_hovered"],
+            "context_preview_clicks": counts["context_preview_clicked"],
             "card_interactions": counts["card_interaction"],
             "suggestions_accepted": counts["suggestion_accepted"],
             "suggestions_rejected": counts["suggestion_rejected"],
@@ -337,6 +339,10 @@ def analyze_inconsistencies(grouped: dict[str, list[Event]]) -> list[dict[str, A
                 str(event.payload.get("action", "unknown"))
                 for event in ordered if event.event_type == "card_interaction"
             )
+            context_preview_directions = Counter(
+                str(event.payload.get("direction", "unknown"))
+                for event in ordered if event.event_type == "context_preview_clicked"
+            )
             outcomes = Counter(str(event.payload.get("outcome", "unknown")) for event in finishes)
             participant = next((event.participant_code for event in ordered if event.participant_code), "")
             output.append({
@@ -360,6 +366,10 @@ def analyze_inconsistencies(grouped: dict[str, list[Event]]) -> list[dict[str, A
                 "editor_marker_hover_ms": editor_hover_ms,
                 "navigation_marker_hovers": counts["navigation_marker_hovered"],
                 "navigation_marker_hover_ms": navigation_hover_ms,
+                "context_preview_clicks": counts["context_preview_clicked"],
+                "context_preview_direction_counts_json": json.dumps(
+                    dict(sorted(context_preview_directions.items())), sort_keys=True
+                ),
                 "card_interactions": counts["card_interaction"],
                 "card_action_counts_json": json.dumps(dict(sorted(card_actions.items())), sort_keys=True),
                 "suggestions_accepted": counts["suggestion_accepted"],
@@ -379,7 +389,8 @@ def analyze_participants(session_rows: list[dict[str, Any]]) -> list[dict[str, A
     output: list[dict[str, Any]] = []
     sum_fields = [
         "total_events", "total_work_ms", "editor_marker_clicks", "navigation_marker_clicks",
-        "editor_marker_hovers", "navigation_marker_hovers", "card_interactions",
+        "editor_marker_hovers", "navigation_marker_hovers", "context_preview_clicks",
+        "card_interactions",
         "suggestions_accepted", "suggestions_rejected", "manual_edits_finished",
         "undo_count", "error_count", "quality_issue_count",
     ]
