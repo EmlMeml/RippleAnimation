@@ -41,7 +41,7 @@ The default output directory is created next to the input CSV.
 ## Outputs
 
 - `sessions.csv`: one row per session with completion, timing, event counts, and quality status.
-- `inconsistency_metrics.csv`: one row per session and inconsistency with work, click, hover, card, and outcome metrics.
+- `inconsistency_metrics.csv`: one row per session and inconsistency with work, marker, context-preview, card, and outcome metrics.
 - `participant_metrics.csv`: participant-level totals across sessions.
 - `event_counts.csv`: overall counts per event type.
 - `quality_issues.csv`: explicit data-quality errors and warnings.
