@@ -3,6 +3,8 @@ import {
   checkExplicitCharacterContradictions,
   isCharacterConsistencyResponse,
   mergeCharacterInconsistencies,
+  deduplicateCharacterInconsistencies,
+  hasVerifiedCharacterEvidence,
 } from "./characterConsistencyChecker";
 
 describe("isCharacterConsistencyResponse", () => {
@@ -71,4 +73,32 @@ it("filters age discrepancies out of character inconsistencies", () => {
   };
 
   expect(mergeCharacterInconsistencies([], [ageIssue])).toEqual([]);
+});
+
+it("does not accumulate reclassified versions across repeated checks", () => {
+  const [original] = checkExplicitCharacterContradictions("Alice never trusted Bob.\nAlice always trusted Bob.");
+  const variant = { ...original, character: " alice ", category: "memory" as const,
+    kind: "possible_ambiguity" as const, message: "Different wording" };
+  let results = [original];
+  for (let run = 0; run < 3; run++) {
+    results = deduplicateCharacterInconsistencies([...results, variant]);
+  }
+  expect(results).toEqual([original]);
+  expect(mergeCharacterInconsistencies([original], [variant])).toEqual([original]);
+});
+
+it("keeps separate conflicts and characters even in the same paragraphs", () => {
+  const [original] = checkExplicitCharacterContradictions("Alice never trusted Bob.\nAlice always trusted Bob.");
+  const separate = { ...original, evidence: original.evidence.map((item) => ({ ...item, quote: "Another claim entirely." })) };
+  const otherCharacter = { ...original, character: "Eve" };
+  expect(deduplicateCharacterInconsistencies([original, separate, otherCharacter])).toHaveLength(3);
+});
+
+it("requires every character quote to exist in its referenced current paragraph", () => {
+  const text = "Alice never trusted Bob.\nAlice always trusted Bob.";
+  const [issue] = checkExplicitCharacterContradictions(text);
+  expect(hasVerifiedCharacterEvidence(issue, text)).toBe(true);
+  expect(hasVerifiedCharacterEvidence(issue, "Alice trusted Eve.\nAlice always trusted Bob.")).toBe(false);
+  expect(hasVerifiedCharacterEvidence({ ...issue, evidence: issue.evidence.map((item) => ({ ...item, paragraphIndex: 90 })) }, text)).toBe(false);
+  expect(hasVerifiedCharacterEvidence({ ...issue, evidence: [] }, text)).toBe(false);
 });

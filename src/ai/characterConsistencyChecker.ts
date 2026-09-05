@@ -178,11 +178,32 @@ export function checkExplicitCharacterContradictions(text: string): CharacterInc
   return results;
 }
 
+export function isSameCharacterIssue(first: CharacterInconsistency, second: CharacterInconsistency): boolean {
+  const normalize = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+  if (normalize(first.character) !== normalize(second.character)) return false;
+  const matchingEvidence = first.evidence.filter((evidence) => second.evidence.some((other) => {
+    if (evidence.paragraphIndex !== other.paragraphIndex) return false;
+    const quote = normalize(evidence.quote);
+    const otherQuote = normalize(other.quote);
+    return Boolean(quote && otherQuote) && (quote.includes(otherQuote) || otherQuote.includes(quote));
+  }));
+  // Classification and wording can vary between AI runs. Across categories,
+  // require both sides of the conflict rather than a single shared passage.
+  return matchingEvidence.length >= 2 ||
+    (first.category === second.category && matchingEvidence.length > 0);
+}
+
+export function deduplicateCharacterInconsistencies(items: CharacterInconsistency[]): CharacterInconsistency[] {
+  return items.filter((item, index) => !items.slice(0, index).some((earlier) =>
+    isSameCharacterIssue(earlier, item)
+  ));
+}
+
 export function mergeCharacterInconsistencies(
   deterministic: CharacterInconsistency[],
   aiGenerated: CharacterInconsistency[]
 ): CharacterInconsistency[] {
-  const merged = [...deterministic];
+  const merged = deduplicateCharacterInconsistencies(deterministic);
   for (const candidate of aiGenerated) {
     const searchableText = [
       candidate.message,
@@ -195,24 +216,28 @@ export function mergeCharacterInconsistencies(
       continue;
     }
 
-    const candidateParagraphs = new Set(candidate.evidence.map((item) => item.paragraphIndex));
-    const duplicate = merged.some((existing) =>
-      existing.character.toLowerCase() === candidate.character.toLowerCase() &&
-      existing.category === candidate.category &&
-      existing.evidence.some((item) => candidateParagraphs.has(item.paragraphIndex))
-    );
+    const duplicate = merged.some((existing) => isSameCharacterIssue(existing, candidate));
     if (!duplicate) merged.push(candidate);
   }
   return merged;
 }
 
-export async function checkCharacterConsistency(text: string): Promise<CharacterInconsistency[]> {
+export function hasVerifiedCharacterEvidence(issue: CharacterInconsistency, text: string): boolean {
+  const paragraphs = text.split(/\r?\n/);
+  return issue.evidence.length > 0 && issue.evidence.every((item) =>
+    Boolean(item.quote.trim()) && Number.isInteger(item.paragraphIndex) &&
+    Boolean(paragraphs[item.paragraphIndex]?.includes(item.quote))
+  );
+}
+
+export async function checkCharacterConsistency(text: string, target?: CharacterInconsistency): Promise<CharacterInconsistency[]> {
   const startedAt = performance.now();
   const numberedText = text.split(/\r?\n/).map((paragraph, index) =>
     `[Paragraph ${index}] ${paragraph}`
   ).join("\n");
 
   const prompt = `You are a character-continuity editor for long-form creative writing.
+${target ? `TARGETED RECHECK: Reevaluate only the following existing issue and its directly dependent passages. Do not discover unrelated issues. Keep the character, category, and kind of this issue in any updated result. The story is provided for context. Return no issue if it is resolved. Existing issue: ${JSON.stringify(target)}` : ""}
 Analyze the story in any language for psychologically or perspectivally inconsistent character writing.
 
 Check: knowledge/information access, beliefs, emotions, goals, motivations, memories,
@@ -242,7 +267,7 @@ ${numberedText}`;
   const deterministic = checkExplicitCharacterContradictions(text);
   const attempts = await Promise.allSettled([
     askAIStructured(prompt, isCharacterConsistencyResponse),
-    askAIStructured(prompt, isCharacterConsistencyResponse),
+    ...(target ? [] : [askAIStructured(prompt, isCharacterConsistencyResponse)]),
   ]);
   const successful = attempts.flatMap((attempt) =>
     attempt.status === "fulfilled" ? attempt.value.inconsistencies : []
@@ -254,7 +279,14 @@ ${numberedText}`;
       : new Error("Character consistency analysis failed.");
   }
 
-  const merged = mergeCharacterInconsistencies(deterministic, successful);
+  const candidates = mergeCharacterInconsistencies(deterministic, successful);
+  if (target && candidates.some((issue) =>
+    issue.character.trim().toLowerCase() === target.character.trim().toLowerCase() &&
+    issue.category === target.category && !hasVerifiedCharacterEvidence(issue, text)
+  )) {
+    throw new Error("The recheck returned passages that could not be located. Please retry the check.");
+  }
+  const merged = candidates.filter((issue) => hasVerifiedCharacterEvidence(issue, text));
 
   console.groupCollapsed(
     `[Character consistency] ${merged.length} issue${merged.length === 1 ? "" : "s"} ` +
