@@ -1,6 +1,6 @@
-.editor-navigation { width: 208px; height: 100%; }
+.editor-navigation { display: flex; flex-direction: column; width: 208px; height: 100%; min-height: 0; }
 .editor-navigation-header { min-height: 48px; box-sizing: border-box; padding: 13px 18px; border-radius: 8px 8px 0 0; background: #97a0c3; color: #fff; font-size: 16px; font-weight: 700; text-align: center; }
-.editor-navigation-items { display: flex; flex-direction: column; align-items: center; gap: 24px; height: calc(100% - 48px); box-sizing: border-box; padding: 24px 20px; overflow-y: auto; border: 2px solid #97a0c3; border-top: 0; border-radius: 0 0 8px 8px; background: #eef0f5; }
+.editor-navigation-items { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 24px; box-sizing: border-box; padding: 24px 20px; overflow-x: hidden; overflow-y: auto; border: 2px solid #97a0c3; border-top: 0; border-radius: 0 0 8px 8px; background: #eef0f5; }
 .editor-page-preview-wrapper { position: relative; width: 152px; flex: 0 0 auto; }
 .editor-page-preview { position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; width: 152px; aspect-ratio: .707; box-sizing: border-box; padding: 20px 16px 30px; border: 1px solid #c8ccd8; border-radius: 3px; background: #fff; box-shadow: 0 3px 8px rgb(37 43 69 / 14%); cursor: pointer; text-align: left; transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
 .editor-page-preview:hover { transform: translateY(-1px); border-color: #6f7ba8; }
@@ -9,7 +9,8 @@
 .editor-page-preview-lines span { position: absolute; display: block; height: 4px; border-radius: 999px; background: #9ca3b5; }
 .editor-page-preview-number { position: absolute; right: 0; bottom: 7px; left: 0; color: #616981; font-size: 12px; text-align: center; }
 .editor-page-conflict-position { position: absolute; z-index: 4; display: block; height: 6px; }
-.editor-page-conflict-line { --minimap-line-color: #ef4444; display: block; width: 100%; height: 8px; padding: 0; transform: translateY(-2px); border: 0; border-radius: 999px; background: var(--minimap-line-color); cursor: pointer; box-shadow: 0 0 0 1px rgb(255 255 255 / 75%); }
+.editor-page-conflict-line { --minimap-line-color: #ef4444; position: relative; display: block; width: 100%; height: 4px; padding: 0; border: 0; border-radius: 999px; background: var(--minimap-line-color); cursor: pointer; box-shadow: 0 0 0 1px rgb(255 255 255 / 75%); }
+.editor-page-conflict-line::before { position: absolute; inset: -2px 0; content: ""; }
 .editor-page-conflict-line--low { --minimap-line-color: #fca5a5; }
 .editor-page-conflict-line--medium { --minimap-line-color: #f87171; }
 .editor-page-conflict-line--high { --minimap-line-color: #ef4444; }

@@ -294,6 +294,27 @@ LIVING LOCATION:
 If the text says that a person lives in a place, always use:
 "lives_in"
 
+RESIDENCE IS NOT PRESENCE OR TRAVEL
+Extract lives_in only for an explicitly stated residence. Walking, climbing,
+travelling through, visiting, arriving at, or temporarily staying in a place
+does not establish residence. Do not substitute located_in for these events.
+A place mentioned near a character in the same paragraph is not evidence
+that the character lives there. Omit missing residences; never use Unknown
+or another placeholder as a residence.
+
+Past homes and childhood memories do not establish a current residence.
+Preserve explicit historical time expressions on historical residence facts.
+If a past residence cannot be temporally represented without treating it as
+current, omit that lives_in fact rather than asserting present residence.
+
+Example:
+"They climbed through forests of black pine. Bob spoke of growing up in a
+narrow house near the beacon cliffs."
+Do not extract bob lives_in black_pine_forest. The forest is a travel setting.
+Do not extract a current bob lives_in narrow_house_near_beacon_cliffs fact.
+The house belongs to a childhood memory, not a simultaneous second residence.
+These sentences do not establish conflicting residences.
+
 Examples:
 "Anna lebt in München."
 →

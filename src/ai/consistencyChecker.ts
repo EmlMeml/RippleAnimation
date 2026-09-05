@@ -232,6 +232,17 @@ function getFactValue(fact: Fact): string {
   return normalizeValue(fact.value);
 }
 
+// Extraction may emit missing-information placeholders as ordinary values.
+// They do not assert a competing fact and cannot establish a contradiction.
+const missingFactValues = new Set([
+  "", "unknown", "unspecified", "not specified", "not known", "not provided",
+  "n/a", "null", "undefined",
+]);
+
+function hasKnownFactValue(fact: Fact): boolean {
+  return !missingFactValues.has(getFactValue(fact).replaceAll("_", " "));
+}
+
 function getFactKey(fact: Fact): string {
   const value = getFactValue(fact);
 
@@ -741,7 +752,7 @@ function checkExclusiveFacts(
   for (const predicate of exclusivePredicates) {
     const facts = extraction.facts.filter(
       (fact) =>
-        fact.predicate === predicate
+        fact.predicate === predicate && hasKnownFactValue(fact)
     );
 
     /*

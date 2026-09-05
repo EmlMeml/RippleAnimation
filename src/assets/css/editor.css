@@ -7,9 +7,9 @@
 }
 
 .editor-navigation-container{
-  padding-top: 24px;
+  margin-block: 24px;
   left: 40px;
-  height: calc(100% - 24px);
+  height: calc(100% - 48px);
 }
 
 .editor-container {

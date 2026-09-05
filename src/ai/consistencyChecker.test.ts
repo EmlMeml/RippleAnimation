@@ -5,6 +5,29 @@ import {
 import type { FactExtraction } from "../types/facts";
 
 describe("checkConsistency", () => {
+  it.each(["unknown", " Unknown ", "unspecified", "not_specified", "", "n/a"])(
+    "does not compare missing residence %s with a concrete residence",
+    (placeholder) => {
+      for (const missing of [{ object: placeholder }, { value: placeholder }]) {
+        expect(checkConsistency({ entities: [], facts: [
+          { subject: "bob", predicate: "lives_in", ...missing },
+          { subject: "bob", predicate: "lives_in", object: "narrow_house_near_beacon_cliffs" },
+        ] })).toEqual([]);
+      }
+    }
+  );
+
+  it("keeps concrete residence conflicts while excluding unknown evidence", () => {
+    const facts: FactExtraction["facts"] = [
+      { subject: "bob", predicate: "lives_in", object: "unknown" },
+      { subject: "bob", predicate: "lives_in", object: "narrow_house_near_beacon_cliffs" },
+      { subject: "bob", predicate: "lives_in", object: "frostvale" },
+    ];
+    const result = checkConsistency({ entities: [], facts });
+    expect(result).toHaveLength(1);
+    expect(result[0].facts).toEqual(facts.slice(1));
+  });
+
   it("erkennt widersprüchliche exklusive Fakten", () => {
     const extraction: FactExtraction = {
       entities: [],

@@ -28,6 +28,7 @@ import { extractFacts } from "./../../analysis/extractesFacts";
 import type { Fact, FactExtraction, Predicate } from "./../../types/facts";
 import { factValueAppearsInText, getFactValuePattern } from "./factTextMatching";
 import { getEditorText } from "./getEditorText";
+import { reconcileReevaluation } from "./reconcileReevaluation";
 import {
   checkConsistency,
   type Inconsistency,
@@ -36,6 +37,8 @@ import {
 } from './../../ai/consistencyChecker';
 import {
   checkCharacterConsistency,
+  isSameCharacterIssue,
+  deduplicateCharacterInconsistencies,
   type CharacterConsistencyCategory,
   type CharacterInconsistency,
 } from "../../ai/characterConsistencyChecker";
@@ -609,6 +612,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [confirmedPositionKeys, setConfirmedPositionKeys] =
     useState<Set<string>>(() => new Set());
   const [dependentPassages, setDependentPassages] = useState<DependentPassage[]>([]);
+  const freeEditDependentPassagesRef = useRef<DependentPassage[]>([]);
   const [handledCharacterEvidenceKeys, setHandledCharacterEvidenceKeys] =
     useState<Set<string>>(() => new Set());
   const [freeEditCharacterEvidenceIndices, setFreeEditCharacterEvidenceIndices] =
@@ -2902,12 +2906,19 @@ function deserialize(
     });
   }, [activeInconsistencyId, document, inconsistencies, successfulInconsistencyId]);
 
+  function selectInconsistencyForAction(inconsistencyId: string) {
+    setActiveInconsistencyId(inconsistencyId);
+    setSelectedInconsistencyId(inconsistencyId);
+    selectedInconsistencyIdRef.current = inconsistencyId;
+  }
+
   function confirmAffectedPosition(
     inconsistency: Inconsistency,
     position: AffectedFactPosition
   ) {
     const wasLastOpenPosition = getAffectedFactPositions(inconsistency).length === 1;
     const inconsistencyId = getStableInconsistencyId(inconsistency);
+    selectInconsistencyForAction(inconsistencyId);
     const previousMarkerCount = verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount ??
       getAffectedFactPositions(inconsistency).length;
     const positionKey = getAffectedPositionKey(inconsistency, position);
@@ -2977,6 +2988,7 @@ function deserialize(
   }
 
   function openSuggestionEditor(inconsistency: Inconsistency, positionIndex?: number) {
+    selectInconsistencyForAction(getStableInconsistencyId(inconsistency));
     const positions = getAffectedFactPositions(inconsistency);
     setSuggestionTarget(inconsistency);
     setSuggestionDraft(getDefaultSuggestion(inconsistency));
@@ -3210,6 +3222,18 @@ function deserialize(
     ));
 
     if (paragraphIndices.length === 0) return;
+    freeEditDependentPassagesRef.current.forEach((passage) => passage.rangeRef.unref());
+    // Capture dependencies before editing: deletion can remove the statement
+    // that lets us locate its following sentence in the first place.
+    freeEditDependentPassagesRef.current = selectedPositions.flatMap(({ fact, range }) => {
+      const dependent = findDependentPassage(range);
+      return dependent ? [{
+        inconsistencyId: getStableInconsistencyId(inconsistency),
+        fact,
+        rangeRef: Editor.rangeRef(editor, dependent.range, { affinity: "inward" }),
+        text: dependent.text,
+      }] : [];
+    });
     freeEditRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
     freeEditChangedRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
     freeEditChangedRangeRefs.current = [];
@@ -3240,6 +3264,7 @@ function deserialize(
     inconsistency: CharacterInconsistency,
     evidenceIndex: number
   ) {
+    selectInconsistencyForAction(getStableCharacterInconsistencyId(inconsistency));
     const restoreScrollPosition = captureEditorScrollPosition();
     const selectedEvidence = inconsistency.evidence[evidenceIndex];
     if (!selectedEvidence) return;
@@ -3283,6 +3308,8 @@ function deserialize(
 
   function cancelFreeEditing() {
     const restoreScrollPosition = captureEditorScrollPosition();
+    freeEditDependentPassagesRef.current.forEach((passage) => passage.rangeRef.unref());
+    freeEditDependentPassagesRef.current = [];
     freeEditRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
     freeEditRangeRefs.current = [];
     freeEditChangedRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
@@ -3336,6 +3363,7 @@ function deserialize(
     inconsistency: CharacterInconsistency,
     evidenceIndex: number
   ) {
+    selectInconsistencyForAction(getStableCharacterInconsistencyId(inconsistency));
     const evidence = inconsistency.evidence[evidenceIndex];
     const block = evidence ? editor.children[evidence.paragraphIndex] : undefined;
     if (!evidence || !block) return;
@@ -3478,9 +3506,7 @@ function deserialize(
     first: CharacterInconsistency,
     second: CharacterInconsistency
   ) {
-    return normalizeSearchText(first.character) === normalizeSearchText(second.character) &&
-      first.category === second.category &&
-      first.kind === second.kind;
+    return isSameCharacterIssue(first, second);
   }
 
   function publishVerifiedMarkerResult(
@@ -3608,7 +3634,20 @@ function deserialize(
         entities: Array.from(entitiesById.values()),
         facts: [...unchangedFacts, ...updatedFacts],
       };
-      const updatedInconsistencies = checkConsistency(updatedAnalysis);
+      const detectedInconsistencies = checkConsistency(updatedAnalysis);
+      // Incremental checks update only the selected issue. Unrelated findings
+      // belong to an explicit full analysis, not each accepted edit.
+      const updatedInconsistencies = checkedInconsistency
+        ? [
+            ...inconsistencies.filter((item) =>
+              getStableInconsistencyId(item) !== getStableInconsistencyId(checkedInconsistency)
+            ),
+            ...detectedInconsistencies.filter((item) =>
+              isSameInconsistency(item, checkedInconsistency) &&
+              getInconsistentTextRanges(editor, [item]).length > 0
+            ),
+          ]
+        : detectedInconsistencies.filter((item) => getInconsistentTextRanges(editor, [item]).length > 0);
 
       const checkedId = checkedInconsistency
         ? getStableInconsistencyId(checkedInconsistency)
@@ -3632,6 +3671,12 @@ function deserialize(
       const isResolved = checkedInconsistency
         ? !refreshedCheckedInconsistency && locallyRemainingOccurrenceCount === 0
         : false;
+      const reconciledInconsistencies = reconcileReevaluation(
+        updatedInconsistencies,
+        checkedInconsistency,
+        refreshedCheckedInconsistency,
+        locallyRemainingOccurrenceCount
+      );
       if (checkedId) {
         const nextOccurrenceCount = refreshedCheckedInconsistency
           ? getAffectedFactPositions(refreshedCheckedInconsistency).length
@@ -3702,12 +3747,12 @@ function deserialize(
       successfulInconsistencyIdRef.current = null;
       successfulRangesRef.current = [];
       setPendingResolvedInconsistencies(null);
-      setInconsistencies(updatedInconsistencies);
+      setInconsistencies(reconciledInconsistencies);
       setInconsistentPaths(
-        getInconsistentPaths(editor, updatedInconsistencies)
+        getInconsistentPaths(editor, reconciledInconsistencies)
       );
       setInconsistentRanges(
-        getInconsistentTextRanges(editor, updatedInconsistencies)
+        getInconsistentTextRanges(editor, reconciledInconsistencies)
       );
       }
       setActiveInconsistencyId(checkedId);
@@ -3786,29 +3831,22 @@ function deserialize(
 
     try {
       const updatedCharacterInconsistencies = await checkCharacterConsistency(
-        getEditorText(editor.children)
+        getEditorText(editor.children), checkedInconsistency
       );
       const refreshed = updatedCharacterInconsistencies.find((item) =>
         isSameCharacterInconsistency(item, checkedInconsistency)
       );
-      const consumedResults = new Set<CharacterInconsistency>();
       const retainedCharacterInconsistencies = characterInconsistencies.map((existing) => {
-        const matched = updatedCharacterInconsistencies.find((candidate) =>
-          !consumedResults.has(candidate) &&
-          isSameCharacterInconsistency(candidate, existing)
-        );
+        if (getStableCharacterInconsistencyId(existing) !== checkedId) return existing;
+        const matched = refreshed;
         if (!matched) return existing;
-        consumedResults.add(matched);
         stableCharacterInconsistencyIds.set(
           matched,
           getStableCharacterInconsistencyId(existing)
         );
         return matched;
       });
-      const mergedCharacterInconsistencies = [
-        ...retainedCharacterInconsistencies,
-        ...updatedCharacterInconsistencies.filter((item) => !consumedResults.has(item)),
-      ];
+      const mergedCharacterInconsistencies = deduplicateCharacterInconsistencies(retainedCharacterInconsistencies);
       const openCharacterInconsistencies = refreshed
         ? mergedCharacterInconsistencies
         : mergedCharacterInconsistencies.filter(
@@ -4281,7 +4319,11 @@ function deserialize(
         afterContext: before.slice(beforeEnd, sentence.end),
       }];
     });
-    if (diffs.length === 0) return null;
+    if (diffs.length === 0) {
+      freeEditDependentPassagesRef.current.forEach((passage) => passage.rangeRef.unref());
+      freeEditDependentPassagesRef.current = [];
+      return null;
+    }
 
     const changeId = `tracked-change-${nextTrackedChangeId.current++}`;
     Editor.withoutNormalizing(editor, () => {
@@ -4333,6 +4375,21 @@ function deserialize(
       })),
     };
     setTrackedChanges((changes) => [...changes, stagedChange]);
+    const dependentCandidates = freeEditDependentPassagesRef.current;
+    freeEditDependentPassagesRef.current = [];
+    const remainingDependencies = dependentCandidates.filter((passage) => {
+      const range = passage.rangeRef.current;
+      const paragraphChanged = range && diffs.some((diff) => diff.paragraphIndex === range.anchor.path[0]);
+      if (range && paragraphChanged &&
+          normalizeSearchText(Editor.string(editor, range)) === normalizeSearchText(passage.text)) {
+        return true;
+      }
+      passage.rangeRef.unref();
+      return false;
+    });
+    if (remainingDependencies.length > 0) {
+      setDependentPassages((current) => [...current, ...remainingDependencies]);
+    }
     setExpandedTrackedChangeId(changeId);
     setDocument([...editor.children]);
     return stagedChange;
