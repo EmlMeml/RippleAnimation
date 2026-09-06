@@ -24,7 +24,7 @@ h1{
 }
 
 .study-gate-card {
-    width: min(680px, 100%);
+    width: min(820px, 100%);
     box-sizing: border-box;
     padding: 40px;
     border: 1px solid #d8ddc9;
@@ -59,6 +59,93 @@ h1{
     padding: 20px;
     border-radius: 12px;
     background: #f4f6ee;
+}
+
+.consent-header p {
+    line-height: 1.55;
+}
+
+.consent-study-title {
+    margin: -8px 0 20px;
+    color: #46522c;
+    font-size: 1.08rem;
+    font-weight: 750;
+}
+
+.consent-summary {
+    margin: 24px 0;
+    padding: 20px;
+    border: 1px solid #dce2cb;
+    border-radius: 12px;
+    background: #f4f6ee;
+}
+
+.consent-summary ul,
+.consent-section-content ul,
+.consent-section-content ol {
+    padding-left: 24px;
+}
+
+.consent-summary li,
+.consent-section-content li {
+    margin: 7px 0;
+}
+
+.consent-summary p,
+.consent-section-content p {
+    line-height: 1.58;
+}
+
+.consent-sections {
+    display: grid;
+    gap: 10px;
+    margin: 24px 0;
+}
+
+.consent-sections details {
+    border: 1px solid #d8ddc9;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.consent-sections summary {
+    padding: 15px 18px;
+    color: #30384f;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.consent-sections details[open] summary {
+    border-bottom: 1px solid #e2e5d9;
+    background: #f8f9f5;
+}
+
+.consent-section-content {
+    padding: 4px 18px 14px;
+}
+
+.consent-copy-button {
+    padding: 9px 13px;
+    border: 1px solid #9da68a;
+    border-radius: 7px;
+    background: #fff;
+    color: #46522c;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.consent-agreements {
+    margin: 24px 0;
+    padding: 8px 18px;
+    border: 1px solid #b9c0a7;
+    border-radius: 10px;
+}
+
+.consent-agreements legend {
+    padding: 0 7px;
+    color: #46522c;
+    font-weight: 800;
 }
 
 .study-information ul {
@@ -207,4 +294,16 @@ h1{
 @media (max-width: 600px) {
     .study-gate-card { padding: 26px 22px; }
     .study-session-bar { align-items: flex-start; }
+}
+
+@media print {
+    body { background: #fff; }
+    .study-gate { display: block; padding: 0; background: #fff; }
+    .study-gate-card { width: 100%; padding: 0; border: 0; box-shadow: none; }
+    .consent-sections details { break-inside: avoid; }
+    .consent-sections details > * { display: block; }
+    .consent-copy-button,
+    .study-field,
+    .consent-agreements,
+    .study-primary-button { display: none; }
 }

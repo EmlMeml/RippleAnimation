@@ -5596,7 +5596,8 @@ function deserialize(
           const factTheme = getFactThemePresentation(inconsistency.predicate);
           const presentationLabel = `${factTheme.label} · ${category.label}`;
           const cardTrackedChanges = trackedChanges.filter(
-            (change) => change.inconsistency === inconsistency
+            (change) =>
+              getStableInconsistencyId(change.inconsistency) === inconsistencyId
           );
           const affectedPositions = getAffectedFactPositions(inconsistency);
           const verifiedOccurrenceCount = verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount;
@@ -5814,7 +5815,8 @@ function deserialize(
           const isHidden = effectiveHiddenInconsistencyIds.has(issueId);
           const navigationIndex = inconsistencies.length + issueIndex;
           const issueDecisions = characterDecisions.filter(
-            (decision) => decision.inconsistency === issue
+            (decision) =>
+              getStableCharacterInconsistencyId(decision.inconsistency) === issueId
           );
           const verifiedOccurrenceCount = verifiedMarkerResults.get(issueId)?.occurrenceCount;
           const remainingEvidenceCount = issue.evidence.filter((_, evidenceIndex) =>
