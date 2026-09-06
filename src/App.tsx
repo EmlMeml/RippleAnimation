@@ -9,13 +9,15 @@ import {
   beginStudySession,
   initializeStudyLogging,
 } from "./study/logger";
+import InformedConsent from "./study/InformedConsent";
 
 type StudyPhase = "consent" | "running" | "confirming" | "completed";
 
 function App() {
   const [phase, setPhase] = useState<StudyPhase>("consent");
   const [participantCode, setParticipantCode] = useState("");
-  const [consented, setConsented] = useState(false);
+  const [participationConsent, setParticipationConsent] = useState(false);
+  const [dataConsent, setDataConsent] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
   const [completionError, setCompletionError] = useState("");
 
@@ -31,7 +33,7 @@ function App() {
   function startStudy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedCode = participantCode.trim();
-    if (!normalizedCode || !consented) return;
+    if (!normalizedCode || !participationConsent || !dataConsent) return;
     beginStudySession(normalizedCode);
     setPhase("running");
   }
@@ -54,67 +56,22 @@ function App() {
     return (
       <main className="study-gate">
         <form className="study-gate-card" onSubmit={startStudy}>
-          <p className="study-eyebrow">User Study</p>
-          <h1>Welcome to the study</h1>
-          <p>
-            This study investigates how the tool is used to identify and resolve
-            inconsistencies. Your interactions with the tool will be recorded under
-            a pseudonymous participant code.
-          </p>
-
-          <section className="study-information" aria-labelledby="logging-heading">
-            <h2 id="logging-heading">What data will be recorded?</h2>
-            <ul>
-              <li>The start, end, and duration of the session</li>
-              <li>Document imports and initiated analyses</li>
-              <li>Clicks on markers, navigation items, and inconsistency cards</li>
-              <li>Accepted, rejected, and manually edited suggestions</li>
-              <li>Time spent and number of interactions per inconsistency</li>
-              <li>Technical errors encountered while using the tool</li>
-            </ul>
-            <p>
-              This form does not collect names or email addresses. The participant
-              code is used only to associate interactions within this study.
-            </p>
-          </section>
-
-          <label className="study-field">
-            <span>Participant code</span>
-            <input
-              value={participantCode}
-              onChange={(event) => setParticipantCode(event.target.value)}
-              maxLength={40}
-              autoComplete="off"
-              required
-              placeholder="e.g. P014"
-            />
-          </label>
-
-          <label className="study-consent">
-            <input
-              type="checkbox"
-              checked={consented}
-              onChange={(event) => setConsented(event.target.checked)}
-              required
-            />
-            <span>
-              I have read the information above and consent to the described recording
-              of my interactions for this study.
-            </span>
-          </label>
+          <InformedConsent
+            participantCode={participantCode}
+            participationConsent={participationConsent}
+            dataConsent={dataConsent}
+            onParticipantCodeChange={setParticipantCode}
+            onParticipationConsentChange={setParticipationConsent}
+            onDataConsentChange={setDataConsent}
+          />
 
           <button
             className="study-primary-button"
             type="submit"
-            disabled={!participantCode.trim() || !consented}
+            disabled={!participantCode.trim() || !participationConsent || !dataConsent}
           >
             Start study
           </button>
-          <p className="study-legal-note">
-            Note for the study team: This text is a technical placeholder. Before the
-            study begins, align it with the participant information sheet and add the
-            relevant contact, retention period, and withdrawal procedure.
-          </p>
         </form>
       </main>
     );
