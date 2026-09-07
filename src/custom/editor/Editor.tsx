@@ -43,9 +43,12 @@ import {
   type CharacterInconsistency,
 } from "../../ai/characterConsistencyChecker";
 import EditorNavigation, { type InconsistentPath, type NavigationTextHighlight } from "./EditorNavigation";
-import { EXAMPLE_TEXT } from "./exampleText";
-import { EXAMPLE_FACTS } from "./exampleFacts";
-import { EXAMPLE_CHARACTER_INCONSISTENCIES } from "./exampleCharacterInconsistencies";
+import { EXAMPLE_TEXT, SECOND_EXAMPLE_TEXT } from "./exampleText";
+import { EXAMPLE_FACTS, SECOND_EXAMPLE_FACTS } from "./exampleFacts";
+import {
+  EXAMPLE_CHARACTER_INCONSISTENCIES,
+  SECOND_EXAMPLE_CHARACTER_INCONSISTENCIES,
+} from "./exampleCharacterInconsistencies";
 
 import type { StoryContext } from "../../types/story";
 import {
@@ -149,6 +152,7 @@ type OffscreenInconsistency = {
   opacity: number;
   occurrenceCount: number;
   successful: boolean;
+  resolutionReady: boolean;
 };
 
 type OffscreenFactPreview = {
@@ -399,6 +403,12 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [characterInconsistencies, setCharacterInconsistencies] =
     useState<CharacterInconsistency[]>([]);
   const [characterAnalysisError, setCharacterAnalysisError] = useState("");
+  const [characterReevaluationRetry, setCharacterReevaluationRetry] = useState<{
+    inconsistency: CharacterInconsistency;
+    rememberedRanges: BaseRange[];
+    markerRanges: BaseRange[];
+    locallyRemainingCount?: number;
+  } | null>(null);
   const [inconsistentPaths, setInconsistentPaths] = useState<InconsistentPath[]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
   const [hiddenInconsistencyIds, setHiddenInconsistencyIds] =
@@ -422,7 +432,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [jitterSuppressedIds, setJitterSuppressedIds] =
     useState<Set<string>>(() => new Set());
   const animationReplayVersion = useRef(0);
-  const useExampleFactsRef = useRef(false);
+  const useExampleFactsRef = useRef<"bellwick" | "harton" | null>(null);
   const exampleDocumentTextRef = useRef("");
   const analysisCacheRef = useRef(new Map<string, {
     result: FactExtraction;
@@ -486,7 +496,14 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         if (currentAnchor && anchorTop !== null) {
           const currentContainerTop = container.getBoundingClientRect().top;
           const currentAnchorTop = currentAnchor.getBoundingClientRect().top - currentContainerTop;
-          container.scrollTop += currentAnchorTop - anchorTop;
+          const anchorShift = currentAnchorTop - anchorTop;
+          // Inline marks and controls may change local geometry, but they must
+          // never make an action jump to the preceding/next virtual page.
+          if (Math.abs(anchorShift) < container.clientHeight / 2) {
+            container.scrollTop += anchorShift;
+          } else {
+            container.scrollTop = scrollTop;
+          }
         } else {
           container.scrollTop = scrollTop;
         }
@@ -545,6 +562,68 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     });
 
     return ranges;
+  }
+
+  function getTextDiffHunks(before: string, after: string) {
+    const tokenize = (text: string) => {
+      const tokens: Array<{ text: string; start: number; end: number }> = [];
+      for (const match of text.matchAll(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu)) {
+        const start = match.index ?? 0;
+        tokens.push({ text: match[0], start, end: start + match[0].length });
+      }
+      return tokens;
+    };
+    const oldTokens = tokenize(before);
+    const newTokens = tokenize(after);
+    const table = Array.from({ length: oldTokens.length + 1 }, () =>
+      new Uint16Array(newTokens.length + 1)
+    );
+    for (let oldIndex = oldTokens.length - 1; oldIndex >= 0; oldIndex -= 1) {
+      for (let newIndex = newTokens.length - 1; newIndex >= 0; newIndex -= 1) {
+        table[oldIndex][newIndex] = oldTokens[oldIndex].text === newTokens[newIndex].text
+          ? table[oldIndex + 1][newIndex + 1] + 1
+          : Math.max(table[oldIndex + 1][newIndex], table[oldIndex][newIndex + 1]);
+      }
+    }
+    const hunks: Array<{ beforeStart: number; beforeEnd: number; afterStart: number; afterEnd: number }> = [];
+    let oldIndex = 0;
+    let newIndex = 0;
+    let current: typeof hunks[number] | null = null;
+    const flush = () => {
+      if (current) hunks.push(current);
+      current = null;
+    };
+    while (oldIndex < oldTokens.length || newIndex < newTokens.length) {
+      if (
+        oldIndex < oldTokens.length && newIndex < newTokens.length &&
+        oldTokens[oldIndex].text === newTokens[newIndex].text
+      ) {
+        flush();
+        oldIndex += 1;
+        newIndex += 1;
+        continue;
+      }
+      const takeInsertion = newIndex < newTokens.length && (
+        oldIndex >= oldTokens.length || table[oldIndex][newIndex + 1] >= table[oldIndex + 1][newIndex]
+      );
+      if (!current) {
+        current = {
+          beforeStart: oldIndex < oldTokens.length ? oldTokens[oldIndex].start : before.length,
+          beforeEnd: oldIndex < oldTokens.length ? oldTokens[oldIndex].start : before.length,
+          afterStart: newIndex < newTokens.length ? newTokens[newIndex].start : after.length,
+          afterEnd: newIndex < newTokens.length ? newTokens[newIndex].start : after.length,
+        };
+      }
+      if (takeInsertion) {
+        current.afterEnd = newTokens[newIndex].end;
+        newIndex += 1;
+      } else {
+        current.beforeEnd = oldTokens[oldIndex].end;
+        oldIndex += 1;
+      }
+    }
+    flush();
+    return hunks;
   }
 
   function getBlockTextRange(
@@ -628,13 +707,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const freeEditDocumentNodesSnapshotRef = useRef<Descendant[]>([]);
   const freeEditInconsistencyIdRef = useRef<string | null>(null);
   const [localEditMarker, setLocalEditMarker] = useState<LocalEditMarkerState | null>(null);
-  const localEditMarkerRef = useRef<LocalEditMarkerState | null>(null);
   const [verifiedMarkerResults, setVerifiedMarkerResults] =
     useState<Map<string, VerifiedMarkerResult>>(() => new Map());
   const [successfulInconsistencyId, setSuccessfulInconsistencyId] =
     useState<string | null>(null);
   const successfulInconsistencyIdRef = useRef<string | null>(null);
   const successfulRangesRef = useRef<InconsistentTextRange[]>([]);
+  const successfulMarkerRangesRef = useRef<BaseRange[]>([]);
   const resolvedInconsistencyIdsRef = useRef<Set<string>>(new Set());
   const [, setPendingResolvedInconsistencies] =
     useState<Inconsistency[] | null>(null);
@@ -734,12 +813,17 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       editable.querySelectorAll<HTMLElement>(":scope > [data-slate-node='element']")
     );
 
-    const isFreeEditing = Boolean(freeEditInconsistency || freeEditCharacterInconsistency);
+    const isLayoutFrozen = Boolean(
+      freeEditInconsistency ||
+      freeEditCharacterInconsistency ||
+      incrementalRecheckActive ||
+      finalizingChangeIds.size > 0
+    );
 
     // Während einer freien Bearbeitung bleiben die bestehenden Seitenabstände
     // eingefroren. Sonst kann bereits ein einziges Zeichen den Absatz über eine
     // Seitengrenze schieben und unmittelbar ein großes padding-top erzeugen.
-    if (!isFreeEditing) {
+    if (!isLayoutFrozen) {
       // Erst den natürlichen Textfluss wiederherstellen, damit die Messung nicht
       // auf Abständen einer früheren Fenster- oder Textgröße basiert.
       blocks.forEach((block) => block.style.removeProperty("padding-top"));
@@ -748,13 +832,14 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         const top = block.offsetTop;
         const height = block.offsetHeight;
         const pageEnd = (Math.floor(top / pageHeight) + 1) * pageHeight;
-        const crossesPageEnd = top + height > pageEnd;
-        const fitsOnOnePage = height <= pageHeight - 116;
+        const pageVerticalPadding = 58;
+        const crossesPageContentEnd = top + height > pageEnd - pageVerticalPadding;
+        const fitsOnOnePage = height <= pageHeight - pageVerticalPadding * 2;
 
-        if (crossesPageEnd && fitsOnOnePage) {
-          // Etwas Abstand nach der sichtbaren Papierkante lässt den neuen Absatz
-          // wie auf einer echten Folgeseite beginnen.
-          block.style.paddingTop = `${pageEnd - top + 24}px`;
+        if (crossesPageContentEnd && fitsOnOnePage) {
+          // Preserve the same readable margin at the top and bottom of every
+          // virtual page, not only at the outer edge of the whole document.
+          block.style.paddingTop = `${pageEnd - top + pageVerticalPadding}px`;
         }
       }
     }
@@ -912,7 +997,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     );
 
     requestAnimationFrame(updatePagination);
-  }, [navigationItems, inconsistentRanges, updatePagination, documentZoom, effectiveHiddenInconsistencyIds, inconsistencies, characterInconsistencies, successfulInconsistencyId, trackedChanges, freeEditInconsistency, freeEditCharacterInconsistency]);
+  }, [navigationItems, inconsistentRanges, updatePagination, documentZoom, effectiveHiddenInconsistencyIds, inconsistencies, characterInconsistencies, successfulInconsistencyId, trackedChanges, freeEditInconsistency, freeEditCharacterInconsistency, incrementalRecheckActive, finalizingChangeIds]);
 
   useEffect(() => {
     const container = editorScrollRef.current;
@@ -1229,7 +1314,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         const category = INCONSISTENCY_CATEGORY_PRESENTATION[inconsistency.category];
         const theme = getFactThemePresentation(inconsistency.predicate);
         const inconsistencyId = getStableInconsistencyId(inconsistency);
-        const successful = successfulInconsistencyId === inconsistencyId;
+        const resolutionReady = successfulInconsistencyId === inconsistencyId;
         return {
           index,
           id: getStableInconsistencyId(inconsistency),
@@ -1237,15 +1322,21 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           emoji: theme.emoji,
           label: theme.label,
           detail: category.label,
-          occurrenceCount: successful
-            ? 0
+          occurrenceCount: incrementalRecheckActive && activeInconsistencyId === inconsistencyId
+            ? verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount ??
+              getAffectedFactPositions(inconsistency).length
+            : resolutionReady
+            ? Math.max(1, new Set(
+                successfulRangesRef.current.map((range) => range.anchor.path[0])
+              ).size)
             : getAffectedFactPositions(inconsistency).length,
-          successful,
+          successful: resolutionReady,
+          resolutionReady,
         };
       }),
       ...characterInconsistencies.map((inconsistency, index) => {
         const inconsistencyId = getStableCharacterInconsistencyId(inconsistency);
-        const successful = successfulInconsistencyId === inconsistencyId ||
+        const resolutionReady = successfulInconsistencyId === inconsistencyId ||
           inconsistency.evidence.every((_, evidenceIndex) =>
             handledCharacterEvidenceKeys.has(
               `${inconsistencyId}:${evidenceIndex}`
@@ -1261,10 +1352,16 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           emoji: CHARACTER_CATEGORY_EMOJI[inconsistency.category],
           label: "Character Continuity",
           detail: `${inconsistency.character} · ${CHARACTER_CATEGORY_PRESENTATION[inconsistency.category]}`,
-          occurrenceCount: successful
-            ? 0
+          occurrenceCount: incrementalRecheckActive && activeInconsistencyId === inconsistencyId
+            ? verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount ??
+              inconsistency.evidence.length - handledEvidenceCount
+            : resolutionReady
+            ? Math.max(1, new Set(
+                successfulRangesRef.current.map((range) => range.anchor.path[0])
+              ).size)
             : inconsistency.evidence.length - handledEvidenceCount,
-          successful,
+          successful: resolutionReady,
+          resolutionReady,
         };
       }),
     ];
@@ -1349,7 +1446,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       const markers = positions
         .filter((position) => position.direction === direction)
         .sort((a, b) => a.edgeOffset - b.edgeOffset)
-        .map(({ index, severity, emoji, label, detail, occurrenceCount, successful, edgeOffset, distance }) => ({
+        .map(({ index, severity, emoji, label, detail, occurrenceCount, successful, resolutionReady, edgeOffset, distance }) => ({
           index,
           severity,
           emoji,
@@ -1357,6 +1454,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           detail,
           occurrenceCount,
           successful,
+          resolutionReady,
           edgeOffset,
           opacity: Math.max(
             0.18,
@@ -1401,7 +1499,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     setOffscreenAbove(markersFor("above"));
     setOffscreenBelow(markersFor("below"));
-  }, [inconsistencies, characterInconsistencies, effectiveHiddenInconsistencyIds, successfulInconsistencyId, handledCharacterEvidenceKeys, hoveredNavigationInconsistencyIndex]);
+  }, [inconsistencies, characterInconsistencies, effectiveHiddenInconsistencyIds, successfulInconsistencyId, handledCharacterEvidenceKeys, hoveredNavigationInconsistencyIndex, incrementalRecheckActive, activeInconsistencyId, verifiedMarkerResults]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -1543,6 +1641,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     if (
       !scrollContainer ||
       !shell ||
+      incrementalRecheckActive ||
       !activeInconsistencyId ||
       offscreenFactPreviews.length === 0
     ) {
@@ -1609,21 +1708,38 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         ].join(" "),
       }];
     }));
-  }, [activeInconsistencyId, offscreenFactPreviews]);
+  }, [activeInconsistencyId, incrementalRecheckActive, offscreenFactPreviews]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
+    const shell = editorScrollShellRef.current;
 
-    if (!scrollContainer) {
+    if (!scrollContainer || !shell) {
       return;
     }
 
-    const scheduleUpdate = () => requestAnimationFrame(updateFactPreviewConnections);
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      // The preview and the paginated editor settle in consecutive renders.
+      // Measure only after both layout passes have completed.
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(updateFactPreviewConnections);
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleUpdate);
     scheduleUpdate();
+    resizeObserver.observe(shell);
+    resizeObserver.observe(scrollContainer);
     scrollContainer.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
 
     return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      resizeObserver.disconnect();
       scrollContainer.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
     };
@@ -1639,8 +1755,33 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         focus: { path: [0, 0], offset: 0 },
       };
     });
+    // A newly loaded document starts a genuinely new analysis run. Stable
+    // inconsistency IDs are intentionally reused for the study examples, so
+    // passage decisions from the previous run must not leak into the new one.
+    freeEditDependentPassagesRef.current.forEach((passage) => passage.rangeRef.unref());
+    freeEditDependentPassagesRef.current = [];
+    freeEditRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
+    freeEditRangeRefs.current = [];
+    freeEditChangedRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
+    freeEditChangedRangeRefs.current = [];
+    setCharacterDecisions([]);
+    setHandledCharacterEvidenceKeys(new Set());
+    setConfirmedPositionKeys(new Set());
+    setDependentPassages([]);
     setTrackedChanges([]);
     setExpandedTrackedChangeId(null);
+    setVerifiedMarkerResults(new Map());
+    setSuccessfulInconsistencyId(null);
+    successfulInconsistencyIdRef.current = null;
+    successfulRangesRef.current = [];
+    successfulMarkerRangesRef.current = [];
+    setPendingResolvedInconsistencies(null);
+    setPendingResolvedCharacterInconsistencies(null);
+    setLocalEditMarker(null);
+    setOffscreenAbove([]);
+    setOffscreenBelow([]);
+    setOffscreenFactPreviews([]);
+    setFactPreviewConnections([]);
     setDocument(nodes);
     editor.onChange();
   }  
@@ -2303,7 +2444,7 @@ function deserialize(
     }
 
   function handleHtmlLoad(html: string) {
-    useExampleFactsRef.current = false;
+    useExampleFactsRef.current = null;
     exampleDocumentTextRef.current = "";
     const nodes = htmlToSlate(html);
 
@@ -2323,7 +2464,7 @@ function deserialize(
     }
 
   function handleFileLoad(text: string) {
-    useExampleFactsRef.current = false;
+    useExampleFactsRef.current = null;
     exampleDocumentTextRef.current = "";
     const paragraphs: ParagraphElement[] = text
       .split(/\r?\n/)
@@ -2344,15 +2485,16 @@ function deserialize(
     });
   }
 
-  function handleExampleLoad() {
-    const paragraphs: ParagraphElement[] = EXAMPLE_TEXT
+  function handleExampleLoad(example: "bellwick" | "harton") {
+    const exampleText = example === "bellwick" ? EXAMPLE_TEXT : SECOND_EXAMPLE_TEXT;
+    const paragraphs: ParagraphElement[] = exampleText
       .split(/\r?\n\s*\r?\n/)
       .map((paragraph) => ({
         type: "paragraph",
         children: [{ text: paragraph.trim() }],
       }));
 
-    useExampleFactsRef.current = true;
+    useExampleFactsRef.current = example;
     exampleDocumentTextRef.current = getEditorText(paragraphs);
     setAnalysis(null);
     setInconsistencies([]);
@@ -2369,7 +2511,8 @@ function deserialize(
     logStudyEvent("document_loaded", {
       source: "example",
       format: "plain_text",
-      character_count: EXAMPLE_TEXT.length,
+      example_id: example,
+      character_count: exampleText.length,
     });
   }
 
@@ -2436,7 +2579,9 @@ function deserialize(
 
       if (useExampleFactsRef.current) {
         await new Promise((resolve) => window.setTimeout(resolve, 3500));
-        result = EXAMPLE_FACTS;
+        result = useExampleFactsRef.current === "bellwick"
+          ? EXAMPLE_FACTS
+          : SECOND_EXAMPLE_FACTS;
       } else {
         result = await extractFacts(text, context);
       }
@@ -2470,7 +2615,9 @@ function deserialize(
 
       try {
         const foundCharacterInconsistencies = useExampleFactsRef.current
-          ? EXAMPLE_CHARACTER_INCONSISTENCIES
+          ? useExampleFactsRef.current === "bellwick"
+            ? EXAMPLE_CHARACTER_INCONSISTENCIES
+            : SECOND_EXAMPLE_CHARACTER_INCONSISTENCIES
           : await checkCharacterConsistency(text);
         setCharacterInconsistencies(foundCharacterInconsistencies);
         setCharacterAnalysisError("");
@@ -2916,6 +3063,7 @@ function deserialize(
     inconsistency: Inconsistency,
     position: AffectedFactPosition
   ) {
+    const restoreScrollPosition = captureEditorScrollPosition();
     const wasLastOpenPosition = getAffectedFactPositions(inconsistency).length === 1;
     const inconsistencyId = getStableInconsistencyId(inconsistency);
     selectInconsistencyForAction(inconsistencyId);
@@ -2973,6 +3121,7 @@ function deserialize(
       previousMarkerCount,
       Math.max(0, previousMarkerCount - 1)
     );
+    restoreScrollPosition();
 
     if (wasLastOpenPosition) {
       setSuccessfulInconsistencyId(inconsistencyId);
@@ -3363,6 +3512,7 @@ function deserialize(
     inconsistency: CharacterInconsistency,
     evidenceIndex: number
   ) {
+    const restoreScrollPosition = captureEditorScrollPosition();
     selectInconsistencyForAction(getStableCharacterInconsistencyId(inconsistency));
     const evidence = inconsistency.evidence[evidenceIndex];
     const block = evidence ? editor.children[evidence.paragraphIndex] : undefined;
@@ -3410,6 +3560,7 @@ function deserialize(
       previousMarkerCount,
       Math.max(0, previousMarkerCount - 1)
     );
+    restoreScrollPosition();
 
     if (!hasOpenEvidence) {
       const successfulRange: InconsistentTextRange = {
@@ -3514,17 +3665,31 @@ function deserialize(
     previousCount: number,
     nextCount: number
   ) {
+    const change = nextCount === 0
+      ? "resolved"
+      : nextCount > previousCount
+        ? "more"
+        : nextCount < previousCount
+          ? "less"
+          : "steady";
+
+    // `setDocument` and the verified result are committed in the same React
+    // batch after "Looks good". Update the already visible local marker as
+    // part of that action as well, so its size cannot briefly retain the old
+    // passage count while Slate decorations are being rebuilt.
+    if (selectedInconsistencyIdRef.current === inconsistencyId) {
+      setLocalEditMarker((current) => current ? {
+        ...current,
+        occurrenceCount: nextCount,
+        change,
+      } : current);
+    }
+
     setVerifiedMarkerResults((current) => {
       const next = new Map(current);
       next.set(inconsistencyId, {
         occurrenceCount: nextCount,
-        change: nextCount === 0
-          ? "resolved"
-          : nextCount > previousCount
-            ? "more"
-            : nextCount < previousCount
-              ? "less"
-              : "steady",
+        change,
         revision: (current.get(inconsistencyId)?.revision ?? 0) + 1,
       });
       return next;
@@ -3571,6 +3736,9 @@ function deserialize(
           })
         );
         successfulRangesRef.current = successfulRanges;
+        successfulMarkerRangesRef.current = rememberedRanges.length > 0
+          ? rememberedRanges
+          : successfulRanges;
         setInconsistentRanges((current) => [
           ...removeInconsistencyFromRanges(current, checkedId),
           ...successfulRanges,
@@ -3580,9 +3748,6 @@ function deserialize(
       setSelectedInconsistencyId(checkedId);
       selectedInconsistencyIdRef.current = checkedId;
       setJitterSuppressedIds(new Set());
-      setOffscreenAbove([]);
-      setOffscreenBelow([]);
-      setOffscreenFactPreviews([]);
       return;
     }
 
@@ -3663,13 +3828,17 @@ function deserialize(
       if (checkedId && refreshedCheckedInconsistency) {
         stableInconsistencyIds.set(refreshedCheckedInconsistency, checkedId);
       }
-      // A probabilistic check can omit an existing issue. Do not present that
-      // as resolved while the editor can still map an affected passage.
+      // The card and the editor must use the same observable completion
+      // criterion. An AI result that contains an issue but no longer maps to
+      // any editor passage is resolved from the participant's perspective.
       const locallyRemainingOccurrenceCount = checkedInconsistency
         ? getAffectedFactPositions(checkedInconsistency).length
         : 0;
+      const refreshedOccurrenceCount = refreshedCheckedInconsistency
+        ? getAffectedFactPositions(refreshedCheckedInconsistency).length
+        : 0;
       const isResolved = checkedInconsistency
-        ? !refreshedCheckedInconsistency && locallyRemainingOccurrenceCount === 0
+        ? locallyRemainingOccurrenceCount === 0 && refreshedOccurrenceCount === 0
         : false;
       const reconciledInconsistencies = reconcileReevaluation(
         updatedInconsistencies,
@@ -3738,6 +3907,9 @@ function deserialize(
         successfulInconsistencyIdRef.current = checkedId;
         setPendingResolvedInconsistencies(updatedInconsistencies);
         successfulRangesRef.current = successfulRanges;
+        successfulMarkerRangesRef.current = rememberedRanges.length > 0
+          ? rememberedRanges
+          : successfulRanges;
         setInconsistentRanges((current) => [
           ...removeInconsistencyFromRanges(current, checkedId),
           ...successfulRanges,
@@ -3746,6 +3918,7 @@ function deserialize(
       setSuccessfulInconsistencyId(null);
       successfulInconsistencyIdRef.current = null;
       successfulRangesRef.current = [];
+      successfulMarkerRangesRef.current = [];
       setPendingResolvedInconsistencies(null);
       setInconsistencies(reconciledInconsistencies);
       setInconsistentPaths(
@@ -3759,9 +3932,6 @@ function deserialize(
       setSelectedInconsistencyId(checkedId);
       selectedInconsistencyIdRef.current = checkedId;
       setJitterSuppressedIds(new Set());
-      setOffscreenAbove([]);
-      setOffscreenBelow([]);
-      setOffscreenFactPreviews([]);
     } catch (error) {
       console.error(error);
       if (checkedInconsistency && isAIRateLimitError(error)) {
@@ -3789,6 +3959,9 @@ function deserialize(
             (item) => getStableInconsistencyId(item) !== checkedId
           ));
           successfulRangesRef.current = successfulRanges;
+          successfulMarkerRangesRef.current = rememberedRanges.length > 0
+            ? rememberedRanges
+            : successfulRanges;
           setInconsistentRanges((current) => [
             ...removeInconsistencyFromRanges(current, checkedId),
             ...successfulRanges,
@@ -3798,6 +3971,7 @@ function deserialize(
           successfulInconsistencyIdRef.current = null;
           setPendingResolvedInconsistencies(null);
           successfulRangesRef.current = [];
+          successfulMarkerRangesRef.current = [];
         }
         setActiveInconsistencyId(checkedId);
         setSelectedInconsistencyId(checkedId);
@@ -3819,15 +3993,17 @@ function deserialize(
   async function reevaluateCharacterInconsistency(
     checkedInconsistency: CharacterInconsistency,
     rememberedRanges: BaseRange[] = [],
-    locallyRemainingCount?: number
+    locallyRemainingCount?: number,
+    markerRanges: BaseRange[] = rememberedRanges
   ) {
     const checkedId = getStableCharacterInconsistencyId(checkedInconsistency);
     const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
       checkedInconsistency.evidence.length;
     setIncrementalRecheckActive(true);
-    setIncrementalRecheckRanges(rememberedRanges);
+    setIncrementalRecheckRanges(markerRanges);
     setAnalyzing(true);
     setCharacterAnalysisError("");
+    setCharacterReevaluationRetry(null);
 
     try {
       const updatedCharacterInconsistencies = await checkCharacterConsistency(
@@ -3884,6 +4060,9 @@ function deserialize(
         successfulInconsistencyIdRef.current = checkedId;
         setPendingResolvedCharacterInconsistencies(openCharacterInconsistencies);
         successfulRangesRef.current = successfulRanges;
+        successfulMarkerRangesRef.current = markerRanges.length > 0
+          ? markerRanges
+          : fallbackRanges;
         setInconsistentRanges([
           ...getInconsistentTextRanges(editor, inconsistencies),
           ...getCharacterInconsistentTextRanges(editor, openCharacterInconsistencies),
@@ -3894,6 +4073,7 @@ function deserialize(
         successfulInconsistencyIdRef.current = null;
         setPendingResolvedCharacterInconsistencies(null);
         successfulRangesRef.current = [];
+        successfulMarkerRangesRef.current = [];
         setInconsistentRanges([
           ...getInconsistentTextRanges(editor, inconsistencies),
           ...getCharacterInconsistentTextRanges(editor, mergedCharacterInconsistencies),
@@ -3904,9 +4084,6 @@ function deserialize(
       setSelectedInconsistencyId(checkedId);
       selectedInconsistencyIdRef.current = checkedId;
       setJitterSuppressedIds(new Set());
-      setOffscreenAbove([]);
-      setOffscreenBelow([]);
-      setOffscreenFactPreviews([]);
     } catch (error) {
       console.error(error);
       if (isAIRateLimitError(error)) {
@@ -3932,6 +4109,9 @@ function deserialize(
             (item) => getStableCharacterInconsistencyId(item) !== checkedId
           ));
           successfulRangesRef.current = successfulRanges;
+          successfulMarkerRangesRef.current = markerRanges.length > 0
+            ? markerRanges
+            : rememberedRanges;
           setInconsistentRanges((current) => [
             ...removeInconsistencyFromRanges(current, checkedId),
             ...successfulRanges,
@@ -3941,16 +4121,25 @@ function deserialize(
           successfulInconsistencyIdRef.current = null;
           setPendingResolvedCharacterInconsistencies(null);
           successfulRangesRef.current = [];
+          successfulMarkerRangesRef.current = [];
         }
         setActiveInconsistencyId(checkedId);
         setSelectedInconsistencyId(checkedId);
         selectedInconsistencyIdRef.current = checkedId;
       } else {
+        setCharacterReevaluationRetry({
+          inconsistency: checkedInconsistency,
+          rememberedRanges,
+          markerRanges,
+          locallyRemainingCount,
+        });
         setCharacterAnalysisError(
-          error instanceof Error
-            ? error.message
-            : "Unknown error during character consistency re-evaluation."
+          "The AI provider is temporarily unavailable. Your change and the open inconsistency have been preserved. Please retry the evaluation."
         );
+        logStudyEvent("error", {
+          source: "character_reevaluation",
+          error_type: "ai_provider_unavailable",
+        });
       }
     } finally {
       setAnalyzing(false);
@@ -4195,7 +4384,7 @@ function deserialize(
     });
 
     if (action === "accept") {
-      useExampleFactsRef.current = false;
+      useExampleFactsRef.current = null;
       exampleDocumentTextRef.current = "";
 
       const inconsistencyId = getStableInconsistencyId(change.inconsistency);
@@ -4421,54 +4610,87 @@ function deserialize(
             secondRange.anchor.offset - firstRange.anchor.offset;
         });
       const rememberedRanges: BaseRange[] = [];
+      const changedRangeRefs = new Set(freeEditChangedRangeRefs.current);
+      const markerRanges: BaseRange[] = [];
       const decisionId = `character-decision-${nextTrackedChangeId.current++}`;
       const beforeBlocks = freeEditParagraphs.flatMap((paragraphIndex) => {
         const block = freeEditDocumentNodesSnapshotRef.current[paragraphIndex];
         return block ? [{ paragraphIndex, block: structuredClone(block) }] : [];
       });
-      const decisionContexts = freeEditParagraphs.flatMap((paragraphIndex) => {
+      const decisionDiffs = freeEditParagraphs.flatMap((paragraphIndex) => {
         const beforeText = freeEditDocumentSnapshotRef.current[paragraphIndex] ?? "";
         const afterText = editor.children[paragraphIndex]
           ? getNodeText(editor.children[paragraphIndex])
           : "";
         if (beforeText === afterText) return [];
-        let start = 0;
-        while (
-          start < beforeText.length &&
-          start < afterText.length &&
-          beforeText[start] === afterText[start]
-        ) start += 1;
-        let beforeEnd = beforeText.length;
-        let afterEnd = afterText.length;
-        while (
-          beforeEnd > start &&
-          afterEnd > start &&
-          beforeText[beforeEnd - 1] === afterText[afterEnd - 1]
-        ) {
-          beforeEnd -= 1;
-          afterEnd -= 1;
-        }
+        const evidenceIntervals = freeEditCharacterInconsistency.evidence
+          .filter((_, evidenceIndex) =>
+            freeEditCharacterEvidenceIndices.includes(evidenceIndex)
+          )
+          .filter((evidence) => evidence.paragraphIndex === paragraphIndex)
+          .flatMap((evidence) => {
+            const start = beforeText.indexOf(evidence.quote);
+            return start >= 0 ? [{ start, end: start + evidence.quote.length }] : [];
+          });
         const contextLength = 48;
-        return [{
-          before: `${start > contextLength ? "…" : ""}${beforeText.slice(Math.max(0, start - contextLength), start)}`,
-          original: beforeText.slice(start, beforeEnd) || "∅",
-          replacement: afterText.slice(start, afterEnd) || "∅",
-          after: `${afterText.slice(afterEnd, afterEnd + contextLength)}${afterEnd + contextLength < afterText.length ? "…" : ""}`,
-        }];
+        return getTextDiffHunks(beforeText, afterText).map((hunk) => ({
+          paragraphIndex,
+          start: hunk.afterStart,
+          afterEnd: hunk.afterEnd,
+          insideEvidence: evidenceIntervals.some((interval) =>
+            hunk.beforeStart === hunk.beforeEnd
+              ? hunk.beforeStart >= interval.start && hunk.beforeStart <= interval.end
+              : hunk.beforeStart < interval.end && hunk.beforeEnd > interval.start
+          ),
+          before: `${hunk.beforeStart > contextLength ? "…" : ""}${beforeText.slice(Math.max(0, hunk.beforeStart - contextLength), hunk.beforeStart)}`,
+          original: beforeText.slice(hunk.beforeStart, hunk.beforeEnd) || "∅",
+          replacement: afterText.slice(hunk.afterStart, hunk.afterEnd) || "∅",
+          after: `${afterText.slice(hunk.afterEnd, hunk.afterEnd + contextLength)}${hunk.afterEnd + contextLength < afterText.length ? "…" : ""}`,
+        }));
       });
+      const decisionContexts = decisionDiffs.map(({ before, original, replacement, after }) => ({
+        before,
+        original,
+        replacement,
+        after,
+      }));
       Editor.withoutNormalizing(editor, () => {
-        // Keep the remaining RangeRefs live while each mark splits Slate text
-        // nodes. Otherwise the first split invalidates paths for later edits,
-        // especially changes outside the originally selected evidence.
+        // Stage only the actual textual delta. The surrounding evidence range
+        // remains an inconsistency, while the removed text is struck through
+        // and only the inserted text receives the green change treatment.
+        [...decisionDiffs]
+          .sort((first, second) =>
+            second.paragraphIndex - first.paragraphIndex || second.start - first.start
+          )
+          .forEach((diff) => {
+            const currentRange = getBlockTextRange(diff.paragraphIndex, diff.start, diff.afterEnd);
+            if (!currentRange) return;
+            const insertionPoint = Editor.pointRef(editor, currentRange.anchor, { affinity: "backward" });
+            if (diff.replacement !== "∅") {
+              Transforms.setNodes<CustomText>(
+                editor,
+                diff.insideEvidence
+                  ? { changeId: decisionId, changeType: "insertion", changeAccepted: true }
+                  : { changeId: decisionId, confirmedCorrect: true, changeAccepted: true },
+                { at: currentRange, match: Text.isText, split: true }
+              );
+            }
+            const point = insertionPoint.unref();
+            if (point && diff.insideEvidence && diff.original !== "∅") {
+              Transforms.insertNodes<CustomText>(
+                editor,
+                { text: diff.original, changeId: decisionId, changeType: "deletion", changeAccepted: true },
+                { at: point }
+              );
+            }
+          });
+
+        // Keep the evidence RangeRefs live while staging splits Slate leaves.
         pendingRangeRefs.forEach((rangeRef) => {
           const range = rangeRef.unref();
           if (!range) return;
           rememberedRanges.push(range);
-          Transforms.setNodes<CustomText>(
-            editor,
-            { confirmedCorrect: true, changeId: decisionId, changeAccepted: true },
-            { at: range, match: Text.isText, split: true }
-          );
+          if (changedRangeRefs.has(rangeRef)) markerRanges.push(range);
         });
       });
       setHandledCharacterEvidenceKeys(handledAfterChange);
@@ -4499,6 +4721,7 @@ function deserialize(
         at: [],
         match: (node) => Text.isText(node) && node.changeId === decisionId,
       })).map(([, path]) => Editor.range(editor, path));
+      markerRanges.splice(0, markerRanges.length, ...markedRanges);
       const successfulRanges: InconsistentTextRange[] = markedRanges.map((range) => ({
         ...range,
         inconsistent: true,
@@ -4518,7 +4741,7 @@ function deserialize(
       setActiveInconsistencyId(targetId);
       setSelectedInconsistencyId(targetId);
       selectedInconsistencyIdRef.current = targetId;
-      useExampleFactsRef.current = false;
+      useExampleFactsRef.current = null;
       exampleDocumentTextRef.current = "";
       if (ENABLE_AI_CHANGE_ACCEPT_CHECK) {
         await reevaluateCharacterInconsistency(
@@ -4528,7 +4751,8 @@ function deserialize(
             ? freeEditCharacterInconsistency.evidence.filter(
                 (_, evidenceIndex) => !handledAfterChange.has(`${targetId}:${evidenceIndex}`)
               ).length
-            : 0
+            : 0,
+          markerRanges.length > 0 ? markerRanges : rememberedRanges
         );
       }
       return;
@@ -4544,7 +4768,7 @@ function deserialize(
     freeEditChangedRangeRefs.current = [];
     freeEditDocumentSnapshotRef.current = [];
     freeEditInconsistencyIdRef.current = null;
-    useExampleFactsRef.current = false;
+    useExampleFactsRef.current = null;
     exampleDocumentTextRef.current = "";
     if (!staged) return;
     setSuggestionTarget(null);
@@ -4664,6 +4888,7 @@ function deserialize(
     if (successfulInconsistencyIdRef.current === targetResolutionId) {
       successfulInconsistencyIdRef.current = null;
       successfulRangesRef.current = [];
+      successfulMarkerRangesRef.current = [];
     }
 
     {
@@ -4675,34 +4900,33 @@ function deserialize(
         getStableInconsistencyId(change.inconsistency) === targetResolutionId
       );
       const insertionOnlyChangeIds = new Set<string>();
-      let finalizationDuration = resolvedCharacterDecisionIds.size > 0 ? 660 : 0;
-      acceptedChanges.forEach((change) => {
+      let finalizationDuration = 0;
+      const allFinalizingChangeIds = new Set([
+        ...acceptedChanges.map((change) => change.id),
+        ...resolvedCharacterDecisionIds,
+      ]);
+      allFinalizingChangeIds.forEach((changeId) => {
         const changedNodes = Array.from(Editor.nodes(editor, {
           at: [],
           match: (node) =>
             Text.isText(node) &&
-            node.changeId === change.id,
+            node.changeId === changeId,
         })).map(([node]) => node).filter(Text.isText);
         const hasDeletion = changedNodes.some((node) => node.changeType === "deletion");
         const hasInsertion = changedNodes.some((node) =>
           node.changeType === "insertion" || node.confirmedCorrect
         );
-        if (!hasDeletion) insertionOnlyChangeIds.add(change.id);
+        if (!hasDeletion) insertionOnlyChangeIds.add(changeId);
         finalizationDuration = Math.max(
           finalizationDuration,
           hasDeletion && hasInsertion ? 1440 : hasDeletion ? 780 : 660
         );
       });
-      const allFinalizingChangeIds = new Set([
-        ...acceptedChanges.map((change) => change.id),
-        ...resolvedCharacterDecisionIds,
-      ]);
-      resolvedCharacterDecisionIds.forEach((id) => insertionOnlyChangeIds.add(id));
       // Measure deletion leaves while they still have their natural inline
       // width. Measuring after the finalizing class is rendered would read the
       // 30em fallback and create a large empty spacer during the wipe.
-      acceptedChanges.forEach((change) => {
-        window.document.querySelectorAll<HTMLElement>(`[data-change-id="${change.id}"]`)
+      allFinalizingChangeIds.forEach((changeId) => {
+        window.document.querySelectorAll<HTMLElement>(`[data-change-id="${changeId}"]`)
           .forEach((element) => {
             const deletion = element.querySelector<HTMLElement>(".tracked-deletion");
             if (deletion) {
@@ -4757,12 +4981,17 @@ function deserialize(
             Text.isText(node) &&
             Boolean(node.changeId && resolvedCharacterDecisionIds.has(node.changeId)),
         })).sort(([, firstPath], [, secondPath]) => Path.compare(secondPath, firstPath));
-        entries.forEach(([, path]) => {
-          Transforms.unsetNodes(
-            editor,
-            ["changeId", "changeAccepted", "confirmedCorrect"],
-            { at: path }
-          );
+        entries.forEach(([node, path]) => {
+          if (!Text.isText(node)) return;
+          if (node.changeType === "deletion") {
+            Transforms.removeNodes(editor, { at: path });
+          } else {
+            Transforms.unsetNodes(
+              editor,
+              ["changeId", "changeType", "changeAccepted", "confirmedCorrect"],
+              { at: path }
+            );
+          }
         });
       });
       setCharacterDecisions((decisions) => decisions.filter(
@@ -4862,10 +5091,6 @@ function deserialize(
   );
 
   useEffect(() => {
-    localEditMarkerRef.current = localEditMarker;
-  }, [localEditMarker]);
-
-  useEffect(() => {
     if (!isFreeEditActive) return;
     setHoveredNavigationInconsistencyIndex(null);
     const editedInconsistencyId = freeEditInconsistencyIdRef.current;
@@ -4875,13 +5100,6 @@ function deserialize(
   const updateLocalEditMarker = useCallback(() => {
     if (!activeInconsistencyId) {
       setLocalEditMarker(null);
-      return;
-    }
-
-    // While the check is running, the spinner belongs to the passage the user
-    // just edited. Do not reposition it to another remembered/check range
-    // until the evaluation has produced its result.
-    if (incrementalRecheckActive && localEditMarkerRef.current?.markers.length) {
       return;
     }
 
@@ -4911,9 +5129,11 @@ function deserialize(
           : 0;
       const resolvedDisplayRanges = result?.change === "resolved" &&
         successfulInconsistencyIdRef.current === activeInconsistencyId
-        ? successfulRangesRef.current.filter((range) =>
-            range.inconsistencyIds.includes(activeInconsistencyId)
-          )
+        ? (successfulMarkerRangesRef.current.length > 0
+            ? successfulMarkerRangesRef.current
+            : successfulRangesRef.current.filter((range) =>
+                range.inconsistencyIds.includes(activeInconsistencyId)
+              ))
         : [];
       const focusedEditRanges = isFreeEditActive &&
         freeEditInconsistencyIdRef.current === activeInconsistencyId
@@ -4936,14 +5156,39 @@ function deserialize(
       // A single passage may span several Slate leaves after typing or after
       // staging the old/new diff. It still owns only one local marker. Distinct
       // passages normally live in distinct paragraph blocks.
-      const markerSourceRanges = result?.change === "resolved"
-        ? sourceRanges
-        : sourceRanges.filter((range, rangeIndex, ranges) =>
-            ranges.findIndex((candidate) => candidate.anchor.path[0] === range.anchor.path[0]) === rangeIndex
-          );
-      const elements = Array.from(scrollContainer.querySelectorAll<HTMLElement>(
+      const markerSourceRanges = sourceRanges.filter((range, rangeIndex, ranges) =>
+        ranges.findIndex((candidate) => candidate.anchor.path[0] === range.anchor.path[0]) === rangeIndex
+      );
+      const inconsistencyElements = Array.from(scrollContainer.querySelectorAll<HTMLElement>(
         `[data-inconsistency-ids~="${activeInconsistencyId}"]`
       )).filter((element) => element.dataset.inconsistencyRole !== "sentence");
+      const activeChangeIds = new Set([
+        ...trackedChanges
+          .filter((change) => getStableInconsistencyId(change.inconsistency) === activeInconsistencyId)
+          .map((change) => change.id),
+        ...characterDecisions
+          .filter((decision) =>
+            getStableCharacterInconsistencyId(decision.inconsistency) === activeInconsistencyId
+          )
+          .map((decision) => decision.id),
+      ]);
+      const allActiveChangeElements = Array.from(
+        scrollContainer.querySelectorAll<HTMLElement>("[data-change-id]")
+      ).filter((element) => Boolean(
+        element.dataset.changeId && activeChangeIds.has(element.dataset.changeId)
+      ));
+      const diffElements = allActiveChangeElements.filter((element) =>
+        Boolean(element.dataset.changeType)
+      );
+      const changedElements = diffElements.length > 0
+        ? diffElements
+        : allActiveChangeElements;
+      // Once an edit has been staged, its Slate ranges may be normalized into
+      // separate deletion/insertion leaves. Those leaves are the authoritative
+      // visual location for the marker while the asynchronous check runs.
+      const elements = incrementalRecheckActive && changedElements.length > 0
+        ? changedElements
+        : [...changedElements, ...inconsistencyElements];
       const seen = new Set<string>();
       const resolvedMarkerTops: number[] = [];
       const rangeMarkers = markerSourceRanges.flatMap((range, rangeIndex) => {
@@ -4976,7 +5221,9 @@ function deserialize(
           if (seen.has(positionKey)) return [];
           seen.add(positionKey);
           return [{
-            key: `${result?.revision ?? 0}:range:${rangeIndex}:${positionKey}`,
+            // Keep the same DOM marker across occurrence-count revisions so
+            // width/height transitions can visibly shrink it after Looks good.
+            key: `range:${range.anchor.path[0]}:${rangeIndex}`,
             x,
             y,
             active: Boolean(editor.selection && Range.includes(range, editor.selection.focus)),
@@ -4985,6 +5232,7 @@ function deserialize(
           return [];
         }
       });
+      const elementMarkerTops: number[] = [];
       const elementMarkers = elements.flatMap((element, elementIndex) => {
         // One marker belongs to one highlighted passage. Using the element's
         // bounding box instead of every line rectangle prevents a marker from
@@ -4993,11 +5241,15 @@ function deserialize(
         if (rect.bottom < viewport.top || rect.top > viewport.bottom) return [];
         const x = rect.left - shellRect.left;
         const y = rect.top - shellRect.top;
+        // A replacement consists of adjacent deletion and insertion leaves,
+        // but represents one edited passage and therefore owns one marker.
+        if (elementMarkerTops.some((existingTop) => Math.abs(existingTop - y) < 8)) return [];
+        elementMarkerTops.push(y);
         const positionKey = `${Math.round(x)}:${Math.round(y)}`;
         if (seen.has(positionKey)) return [];
         seen.add(positionKey);
         return [{
-          key: `${result?.revision ?? 0}:${elementIndex}:${positionKey}`,
+          key: `element:${element.dataset.changeId ?? activeInconsistencyId}:${elementIndex}`,
           x,
           y,
           active: Boolean(selectionAnchor && element.contains(selectionAnchor)),
@@ -5016,7 +5268,7 @@ function deserialize(
           const caretRect = caretDomRange.getBoundingClientRect();
           if (caretRect.bottom >= viewport.top && caretRect.top <= viewport.bottom) {
             markers = [{
-              key: `${result?.revision ?? 0}:caret:${editor.selection.focus.path.join(".")}:${editor.selection.focus.offset}`,
+              key: `caret:${editor.selection.focus.path[0]}`,
               x: caretRect.left - shellRect.left,
               y: caretRect.top - shellRect.top,
               active: true,
@@ -5032,6 +5284,9 @@ function deserialize(
       }
 
       if (markers.length === 0 && incrementalRecheckActive) {
+        // The checked passage has left the viewport. Do not leave its previous
+        // screen coordinates behind as a marker floating over unrelated text.
+        setLocalEditMarker(null);
         return;
       }
 
@@ -5060,7 +5315,7 @@ function deserialize(
     } catch {
       if (!incrementalRecheckActive) setLocalEditMarker(null);
     }
-  }, [activeInconsistencyId, characterInconsistencies, editor, handledCharacterEvidenceKeys, incrementalRecheckActive, incrementalRecheckRanges, inconsistencies, isFreeEditActive, verifiedMarkerResults]);
+  }, [activeInconsistencyId, characterDecisions, characterInconsistencies, editor, handledCharacterEvidenceKeys, incrementalRecheckActive, incrementalRecheckRanges, inconsistencies, isFreeEditActive, trackedChanges, verifiedMarkerResults]);
 
   useEffect(() => {
     const animationFrame = window.requestAnimationFrame(updateLocalEditMarker);
@@ -5254,7 +5509,7 @@ function deserialize(
                 useExampleFactsRef.current &&
                 getEditorText(value) !== exampleDocumentTextRef.current
               ) {
-                useExampleFactsRef.current = false;
+                useExampleFactsRef.current = null;
                 exampleDocumentTextRef.current = "";
               }
 
@@ -5469,7 +5724,7 @@ function deserialize(
               <span className="analysis-loading-scan" aria-hidden="true" />
             </div>
           )}
-          {factPreviewConnections.length > 0 && (
+          {!incrementalRecheckActive && factPreviewConnections.length > 0 && (
             <svg
               className="fact-preview-connection-overlay"
               width="100%"
@@ -5800,9 +6055,26 @@ function deserialize(
           <span><strong>Character Continuity</strong><small>Thoughts, knowledge, motives, emotions, and development</small></span>
           <span className="inconsistency-group-count">{characterInconsistencies.length}</span>
         </summary>
-        {characterAnalysisError ? (
-          <p className="character-consistency-error">{characterAnalysisError}</p>
-        ) : characterInconsistencies.length === 0 ? (
+        {characterAnalysisError && (
+          <div className="character-consistency-error" role="alert">
+            <p>{characterAnalysisError}</p>
+            {characterReevaluationRetry && (
+              <button
+                type="button"
+                onClick={() => void reevaluateCharacterInconsistency(
+                  characterReevaluationRetry.inconsistency,
+                  characterReevaluationRetry.rememberedRanges,
+                  characterReevaluationRetry.locallyRemainingCount,
+                  characterReevaluationRetry.markerRanges
+                )}
+                disabled={analyzing}
+              >
+                {analyzing ? "Retrying…" : "Retry evaluation"}
+              </button>
+            )}
+          </div>
+        )}
+        {characterInconsistencies.length === 0 ? (
           <p className="conflict-list-empty">No character inconsistencies found.</p>
         ) : characterInconsistencies
         .map((issue, issueIndex) => ({ issue, issueIndex }))
@@ -6115,7 +6387,10 @@ function OffscreenMarker({
   if (marker.occurrenceCount <= 0) return null;
 
   const countStatus = marker.successful ? "treated" : "open";
-  const label = `${marker.label}: ${marker.detail}, ${marker.occurrenceCount} ${countStatus} ${marker.occurrenceCount === 1 ? "passage" : "passages"}, ${direction === "above" ? "above" : "below"} the visible editor area`;
+  const passageStatus = marker.resolutionReady
+    ? "ready to resolve"
+    : `${marker.occurrenceCount} ${countStatus} ${marker.occurrenceCount === 1 ? "passage" : "passages"}`;
+  const label = `${marker.label}: ${marker.detail}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
 
   return (
     <button
@@ -6132,7 +6407,7 @@ function OffscreenMarker({
       <span className="offscreen-inconsistency-marker-icon" aria-hidden="true">{marker.emoji}</span>
       <span className="offscreen-inconsistency-tooltip" aria-hidden="true">
         <strong>{marker.label}</strong>
-        <span>{marker.detail} · {marker.occurrenceCount} {countStatus}</span>
+        <span>{marker.detail} · {passageStatus}</span>
       </span>
     </button>
   );
@@ -6153,7 +6428,7 @@ function Toolbar({
 }:{
     onTextLoad: (text:string) => void;
     onHtmlLoad: (text:string) => void;
-    onExampleLoad: () => void;
+    onExampleLoad: (example: "bellwick" | "harton") => void;
     onAnalyze: () => void;
     analyzing: boolean;
     documentZoom: number;
@@ -6181,10 +6456,19 @@ function Toolbar({
         type="button"
         onMouseDown={(event) => {
           event.preventDefault();
-          onExampleLoad();
+          onExampleLoad("bellwick");
         }}
       >
-        Example Text
+        Example Text 1
+      </button>
+      <button
+        type="button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onExampleLoad("harton");
+        }}
+      >
+        Example Text 2
       </button>
       <div className="document-zoom-controls" role="group" aria-label="Document zoom">
         <button
@@ -6441,10 +6725,21 @@ function renderLeaf({
   const belongsToActiveSentence =
     activeInconsistencyId !== null &&
     leaf.sentenceInconsistencyIds?.includes(activeInconsistencyId);
-  const isSuccessful = successfulInconsistencyId !== null &&
-    leaf.inconsistencyIds?.includes(successfulInconsistencyId);
+  const isVisibleConfirmedPassage = Boolean(
+    leaf.confirmedCorrect &&
+    leaf.changeId &&
+    visibleConfirmedChangeIds.has(leaf.changeId)
+  );
+  const suppressOuterInconsistencyDecoration = Boolean(
+    isVisibleConfirmedPassage ||
+    (
+      successfulInconsistencyId !== null &&
+      leaf.inconsistencyIds?.includes(successfulInconsistencyId) &&
+      !leaf.changeType
+    )
+  );
   const renderAsActiveSentence =
-    belongsToActiveSentence && !belongsToActiveScope && !isSuccessful;
+    belongsToActiveSentence && !belongsToActiveScope;
   const suppressJitter = leaf.inconsistencyIds?.some(
     (id: string) => jitterSuppressedIds.has(id)
   );
@@ -6467,9 +6762,7 @@ function renderLeaf({
   }
 
   if (
-    leaf.confirmedCorrect &&
-    leaf.changeId &&
-    visibleConfirmedChangeIds.has(leaf.changeId)
+    isVisibleConfirmedPassage
   ) {
     children = <mark className="confirmed-correct-passage">{children}</mark>;
   }
@@ -6527,22 +6820,22 @@ function renderLeaf({
       className={[
         leaf.suggestionPreview
           ? "sentence-suggestion-preview"
-          : isHidden
+          : suppressOuterInconsistencyDecoration
           ? undefined
-          : isSuccessful && leaf.inconsistencyRole !== "conflict"
+          : isHidden
           ? undefined
           : renderAsActiveSentence
           ? [
               "inconsistency-sentence",
               "inconsistency-sentence--active",
-              isSuccessful ? "inconsistency-mark--success" : "",
+              "",
             ].join(" ")
           : leaf.freeEditInsertion
           ? "free-edit-insertion"
           : leaf.inconsistencyRole === "conflict"
           ? [
               "inconsistent-text",
-              isSuccessful ? "inconsistency-mark--success" : "",
+              "",
               `inconsistent-text--${
                 leaf.inconsistencySeverity ?? "medium"
               }`,
@@ -6557,7 +6850,7 @@ function renderLeaf({
           : leaf.inconsistencyRole === "context"
             ? [
                 "inconsistency-context",
-                isSuccessful ? "inconsistency-mark--success" : "",
+                "",
                 belongsToActiveScope
                   ? "inconsistency-context--active"
                   : "",
@@ -6571,7 +6864,7 @@ function renderLeaf({
             : leaf.inconsistencyRole === "sentence"
               ? [
                   "inconsistency-sentence",
-                  isSuccessful ? "inconsistency-mark--success" : "",
+                  "",
                   belongsToActiveScope
                     ? "inconsistency-sentence--active"
                     : "",

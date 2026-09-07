@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { isCharacterConsistencyResponse } from "../../ai/characterConsistencyChecker";
-import { EXAMPLE_CHARACTER_INCONSISTENCIES } from "./exampleCharacterInconsistencies";
+import {
+  EXAMPLE_CHARACTER_INCONSISTENCIES,
+  SECOND_EXAMPLE_CHARACTER_INCONSISTENCIES,
+} from "./exampleCharacterInconsistencies";
 
 describe("EXAMPLE_CHARACTER_INCONSISTENCIES", () => {
-  it("contains three valid precomputed character inconsistencies", () => {
-    expect(EXAMPLE_CHARACTER_INCONSISTENCIES).toHaveLength(3);
-    expect(isCharacterConsistencyResponse({
-      inconsistencies: EXAMPLE_CHARACTER_INCONSISTENCIES,
-    })).toBe(true);
+  it.each([
+    ["Bellwick", EXAMPLE_CHARACTER_INCONSISTENCIES],
+    ["Harton", SECOND_EXAMPLE_CHARACTER_INCONSISTENCIES],
+  ])("contains two valid precomputed character inconsistencies for %s", (_, inconsistencies) => {
+    expect(inconsistencies).toHaveLength(2);
+    expect(inconsistencies.map(({ category }) => category).sort()).toEqual(["belief", "memory"]);
+    expect(isCharacterConsistencyResponse({ inconsistencies })).toBe(true);
   });
 });
