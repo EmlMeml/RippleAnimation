@@ -4623,25 +4623,11 @@ function deserialize(
           ? getNodeText(editor.children[paragraphIndex])
           : "";
         if (beforeText === afterText) return [];
-        const evidenceIntervals = freeEditCharacterInconsistency.evidence
-          .filter((_, evidenceIndex) =>
-            freeEditCharacterEvidenceIndices.includes(evidenceIndex)
-          )
-          .filter((evidence) => evidence.paragraphIndex === paragraphIndex)
-          .flatMap((evidence) => {
-            const start = beforeText.indexOf(evidence.quote);
-            return start >= 0 ? [{ start, end: start + evidence.quote.length }] : [];
-          });
         const contextLength = 48;
         return getTextDiffHunks(beforeText, afterText).map((hunk) => ({
           paragraphIndex,
           start: hunk.afterStart,
           afterEnd: hunk.afterEnd,
-          insideEvidence: evidenceIntervals.some((interval) =>
-            hunk.beforeStart === hunk.beforeEnd
-              ? hunk.beforeStart >= interval.start && hunk.beforeStart <= interval.end
-              : hunk.beforeStart < interval.end && hunk.beforeEnd > interval.start
-          ),
           before: `${hunk.beforeStart > contextLength ? "…" : ""}${beforeText.slice(Math.max(0, hunk.beforeStart - contextLength), hunk.beforeStart)}`,
           original: beforeText.slice(hunk.beforeStart, hunk.beforeEnd) || "∅",
           replacement: afterText.slice(hunk.afterStart, hunk.afterEnd) || "∅",
@@ -4669,14 +4655,12 @@ function deserialize(
             if (diff.replacement !== "∅") {
               Transforms.setNodes<CustomText>(
                 editor,
-                diff.insideEvidence
-                  ? { changeId: decisionId, changeType: "insertion", changeAccepted: true }
-                  : { changeId: decisionId, confirmedCorrect: true, changeAccepted: true },
+                { changeId: decisionId, changeType: "insertion", changeAccepted: true },
                 { at: currentRange, match: Text.isText, split: true }
               );
             }
             const point = insertionPoint.unref();
-            if (point && diff.insideEvidence && diff.original !== "∅") {
+            if (point && diff.original !== "∅") {
               Transforms.insertNodes<CustomText>(
                 editor,
                 { text: diff.original, changeId: decisionId, changeType: "deletion", changeAccepted: true },
