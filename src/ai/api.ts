@@ -3,6 +3,8 @@ import type { FactExtraction } from "../types/facts";
 const AI_ENDPOINT =
   "https://small-hill-7bd7.ripple-ai.workers.dev/api/chat";
 const AI_REQUEST_TIMEOUT_MS = 600_000;
+const TRANSIENT_RESPONSE_RETRY_LIMIT = 2;
+const TRANSIENT_RESPONSE_RETRY_DELAY_MS = 750;
 
 interface AIResponse {
   response?: FactExtraction;
@@ -25,7 +27,8 @@ function isLegacyFactExtraction(value: unknown): boolean {
 /** Sends a prompt whose JSON response is validated by the caller. */
 export async function askAIStructured<T>(
   prompt: string,
-  validate: (value: unknown) => value is T
+  validate: (value: unknown) => value is T,
+  transientRetryAttempt = 0
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
@@ -58,6 +61,25 @@ export async function askAIStructured<T>(
       if (isLegacyFactExtraction(rawResponse)) {
         throw new Error(
           "The AI backend returned the legacy fact-extraction format for the character consistency request. The worker must support a separate character-consistency response schema."
+        );
+      }
+
+      const isEmptyResponseFailure = response.status === 502 &&
+        /(?:returned an )?empty response/i.test(responseText);
+      const isProviderRoutingFailure = response.status === 404 &&
+        /OpenRouter request failed|Provider returned error|provider_name/i.test(responseText);
+      if (
+        (isEmptyResponseFailure || isProviderRoutingFailure) &&
+        transientRetryAttempt < TRANSIENT_RESPONSE_RETRY_LIMIT
+      ) {
+        await new Promise<void>((resolve) => window.setTimeout(
+          resolve,
+          TRANSIENT_RESPONSE_RETRY_DELAY_MS * (transientRetryAttempt + 1)
+        ));
+        return askAIStructured(
+          prompt,
+          validate,
+          transientRetryAttempt + 1
         );
       }
 

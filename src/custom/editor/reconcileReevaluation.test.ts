@@ -5,7 +5,7 @@ import { reconcileReevaluation } from "./reconcileReevaluation";
 
 describe("reconcileReevaluation", () => {
   const original = checkConsistency(EXAMPLE_FACTS);
-  const location = original.find((issue) => issue.predicate === "located_in")!;
+  const location = original.find((issue) => issue.predicate === "born_in")!;
   const others = original.filter((issue) => issue !== location);
 
   it("keeps the Location card and its identity when rechecking omits it with open passages", () => {

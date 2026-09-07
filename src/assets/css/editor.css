@@ -1,5 +1,5 @@
 .content-container{
-  width: min(100%, 1400px);
+  width: min(calc(100% - 32px), 1600px);
   display: flex;
   flex-direction: row;
   height: min(920px, calc(100vh - 32px));
@@ -20,7 +20,7 @@
   max-height: calc(100% - 48px);
   min-height: 672px;
   box-sizing: border-box;
-  margin: 24px;
+  margin: 24px 16px;
   border: 2px solid #97a0c3;
   background-color: #fefefe;
   border-radius: 8px;
@@ -31,19 +31,33 @@
 
 .toolbar {
   display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid #97a0c3;
   background: #97a0c3;
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .toolbar button {
+  flex: 0 0 auto;
   padding: 5px 10px;
   border: 1px solid #3f496f;
   border-radius: 8px;
   background: #b8bfd8;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  box-sizing: border-box;
 }
 
 .toolbar button:hover{
@@ -63,10 +77,13 @@
   border: 1px solid #6f7ba8;
   border-radius: 8px;
   background: rgb(255 255 255 / 35%);
+  height: 40px;
+  box-sizing: border-box;
 }
 
 .toolbar .document-zoom-controls button {
   min-width: 30px;
+  height: 32px;
   padding: 3px 7px;
   border: 0;
   border-radius: 5px;
@@ -85,7 +102,8 @@
 
 .toolbar .uploadDiv .fileUploadBtn{
   cursor: pointer;
-  height: 38px;
+  height: 40px;
+  box-sizing: border-box;
   padding-right: 12px;
   padding-left: 8px;
   display: inline-flex;
@@ -98,6 +116,12 @@
   border-radius: 8px;
   background:#b8bfd8;
   font-size: 14px ;
+  white-space: nowrap;
+}
+
+.toolbar .uploadDiv {
+  display: flex;
+  flex: 0 0 auto;
 }
 
 .toolbar .uploadDiv .fileUploadBtn:hover{
@@ -277,6 +301,13 @@
 .editor--scope-active [data-slate-leaf] {
   opacity: 0.72;
   transition: opacity 180ms ease;
+}
+
+/* Free editing can remove the exact leaf that carried the active-sentence
+   metadata. Keep the editable sentence/document at its normal text intensity
+   instead of dimming everything that remains after that leaf disappears. */
+.editor-scroll-shell--free-edit .editor.editor--scope-active [data-slate-leaf] {
+  opacity: 1;
 }
 
 .editor .inconsistency-scope-active {
@@ -902,8 +933,8 @@
 
 .conflict-list {
   position: relative;
-  flex: 0 1 360px;
-  width: 360px;
+  flex: 0 1 340px;
+  width: 340px;
   min-width: 0;
   max-width: 90%;
   height: calc(100% - 48px);
@@ -981,7 +1012,28 @@
 .character-consistency-card > p { color: #4b5563; font-size: .8rem; line-height: 1.45; margin: 0 0 .6rem; }
 .character-consistency-evidence blockquote { background: #f5f3ff; border-radius: .35rem; color: #374151; font-size: .76rem; margin: .4rem 0; padding: .55rem; }
 .character-consistency-evidence blockquote span { color: #6b7280; display: block; font-size: .7rem; margin-top: .25rem; }
-.character-consistency-error { color: #b91c1c; font-size: .78rem; line-height: 1.4; }
+.character-consistency-error {
+  margin: 10px 12px;
+  padding: 10px;
+  border: 1px solid #fca5a5;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: .78rem;
+  line-height: 1.4;
+}
+.character-consistency-error p { margin: 0 0 8px; }
+.character-consistency-error button {
+  padding: 5px 9px;
+  border: 1px solid #b91c1c;
+  border-radius: 5px;
+  background: #fff;
+  color: #991b1b;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.character-consistency-error button:disabled { cursor: wait; opacity: .6; }
 
 .inconsistency-group {
   border-bottom: 1px solid #e5e7eb;
