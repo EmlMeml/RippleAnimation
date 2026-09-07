@@ -709,14 +709,19 @@
   line-height: 1.35;
   box-shadow: 0 3px 12px rgb(120 53 15 / 18%);
   animation: offscreen-fact-preview-in 260ms ease-out both;
-  cursor: pointer;
+  cursor: default;
   font-family: inherit;
   text-align: left;
   pointer-events: auto;
   transition: box-shadow 180ms ease, transform 180ms ease;
+  user-select: none;
 }
 
-.offscreen-fact-preview:hover,
+.offscreen-fact-preview,
+.offscreen-fact-preview * {
+  cursor: default !important;
+}
+
 .offscreen-fact-preview:focus-visible {
   box-shadow: 0 5px 16px rgb(120 53 15 / 28%);
   outline: 2px solid #f59e0b;
@@ -1816,13 +1821,18 @@
   font-size: .75rem;
   line-height: 1.45;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
   overflow-wrap: anywhere;
   word-break: break-word;
   transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+  user-select: none;
 }
 
-.tracked-change-context:hover,
+.tracked-change-context,
+.tracked-change-context * {
+  cursor: default !important;
+}
+
 .tracked-change-context:focus-visible {
   border-color: rgb(34 197 94 / 70%);
   background: rgb(240 253 244 / 92%);
