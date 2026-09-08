@@ -230,6 +230,85 @@ export function hasVerifiedCharacterEvidence(issue: CharacterInconsistency, text
   );
 }
 
+export function preserveTargetAfterModifierOnlyEdit(
+  target: CharacterInconsistency,
+  text: string
+): CharacterInconsistency | null {
+  const paragraphs = text.split(/\r?\n/);
+  let foundModifierEdit = false;
+  const evidence = target.evidence.map((item) => {
+    const paragraph = paragraphs[item.paragraphIndex] ?? "";
+    const sentences = paragraph.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+    const tokenize = (value: string): string[] =>
+      value.toLowerCase().match(/[\p{L}\p{N}'’-]+/gu) ?? [];
+    const originalTokens = tokenize(item.quote);
+    const best = sentences
+      .map((sentence) => {
+        const tokens = tokenize(sentence);
+        const overlap = originalTokens.filter((token) => tokens.includes(token)).length;
+        return { sentence, tokens, overlap };
+      })
+      .sort((first, second) => second.overlap - first.overlap)[0];
+    if (!best || best.overlap < Math.max(3, originalTokens.length - 2)) return item;
+
+    const removed = originalTokens.filter((token) => !best.tokens.includes(token));
+    const added = best.tokens.filter((token) => !originalTokens.includes(token));
+    const changed = [...removed, ...added];
+    if (changed.length > 0 && changed.every((token) => token.endsWith("ly"))) {
+      foundModifierEdit = true;
+      return { ...item, quote: best.sentence };
+    }
+    return item;
+  });
+
+  return foundModifierEdit ? { ...target, evidence } : null;
+}
+
+export function preserveTargetForDependentMemoryClaim(
+  target: CharacterInconsistency,
+  text: string
+): CharacterInconsistency | null {
+  if (target.category !== "memory" && target.category !== "knowledge") return null;
+  const paragraphs = text.split(/\r?\n/);
+  const conflictEvidence = target.evidence.at(-1);
+  if (!conflictEvidence) return null;
+  const paragraph = paragraphs[conflictEvidence.paragraphIndex] ?? "";
+  const sentences = paragraph.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+  const dependentSentence = sentences.find((sentence) =>
+    /\bfrom\s+(?:her|his|their|my)?\s*memory\b|\brecall(?:ed|s|ing)?\b|\bremember(?:ed|s|ing)?\b[^.!?]*\b(?:content|contents|detail|details)\b|\bdescrib(?:e|ed|es|ing)\b[^.!?]*\b(?:content|contents|detail|details)\b/i.test(sentence) &&
+    sentence !== conflictEvidence.quote
+  );
+  if (!dependentSentence) return null;
+
+  return {
+    ...target,
+    message: `${target.character}'s later passage still implies memory or knowledge that conflicts with the earlier evidence.`,
+    explanation: "A dependent sentence still claims recall or knowledge of the material, so changing only the preceding sentence does not resolve the continuity issue.",
+    evidence: [
+      ...target.evidence.slice(0, -1),
+      {
+        paragraphIndex: conflictEvidence.paragraphIndex,
+        quote: dependentSentence,
+        interpretation: "This dependent statement still claims memory or knowledge of the material.",
+      },
+    ],
+  };
+}
+
+export function hasExplicitlyNegatedTargetMemoryClaim(
+  target: CharacterInconsistency,
+  text: string
+): boolean {
+  if (target.category !== "memory" && target.category !== "knowledge") return false;
+  const conflictEvidence = target.evidence.at(-1);
+  if (!conflictEvidence) return false;
+  const paragraph = text.split(/\r?\n/)[conflictEvidence.paragraphIndex] ?? "";
+  const sentences = paragraph.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()) ?? [];
+  return sentences.some((sentence) =>
+    /\b(?:did\s+not|didn['’]?t|never)\s+(?:clearly\s+|definitely\s+)?remember(?:ed|s|ing)?\b/i.test(sentence)
+  );
+}
+
 export async function checkCharacterConsistency(text: string, target?: CharacterInconsistency): Promise<CharacterInconsistency[]> {
   const startedAt = performance.now();
   const numberedText = text.split(/\r?\n/).map((paragraph, index) =>
@@ -279,7 +358,29 @@ ${numberedText}`;
       : new Error("Character consistency analysis failed.");
   }
 
-  const candidates = mergeCharacterInconsistencies(deterministic, successful);
+  const modifierOnlyTarget = target
+    ? preserveTargetAfterModifierOnlyEdit(target, text)
+    : null;
+  const dependentMemoryTarget = target
+    ? preserveTargetForDependentMemoryClaim(target, text)
+    : null;
+  const explicitlyNegatedTarget = target
+    ? hasExplicitlyNegatedTargetMemoryClaim(target, text)
+    : false;
+  const usableSuccessful = explicitlyNegatedTarget && !dependentMemoryTarget && target
+    ? successful.filter((issue) =>
+        issue.character.trim().toLowerCase() !== target.character.trim().toLowerCase() ||
+        issue.category !== target.category
+      )
+    : successful;
+  const candidates = mergeCharacterInconsistencies(
+    deterministic,
+    [
+      ...(dependentMemoryTarget ? [dependentMemoryTarget] : []),
+      ...(modifierOnlyTarget ? [modifierOnlyTarget] : []),
+      ...usableSuccessful,
+    ]
+  );
   if (target && candidates.some((issue) =>
     issue.character.trim().toLowerCase() === target.character.trim().toLowerCase() &&
     issue.category === target.category && !hasVerifiedCharacterEvidence(issue, text)
