@@ -1256,6 +1256,51 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     }
   }
 
+  function focusOffscreenInconsistency(index: number, direction: "above" | "below") {
+    const item = navigationItems[index];
+    const scrollContainer = editorScrollRef.current;
+    if (!item || !scrollContainer) return;
+
+    // Preserve the normal selection/card/logging behavior, but perform the
+    // actual scroll against the offscreen DOM passage represented by this
+    // directional marker instead of the closest (often already visible) range.
+    focusInconsistency(index, false, false, "editor_offscreen_marker");
+    const relatedChangeIds = new Set([
+      ...trackedChanges
+        .filter((change) => getStableInconsistencyId(change.inconsistency) === item.id)
+        .map((change) => change.id),
+      ...characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === item.id
+        )
+        .map((decision) => decision.id),
+    ]);
+    const viewport = scrollContainer.getBoundingClientRect();
+    const candidates = Array.from(scrollContainer.querySelectorAll<HTMLElement>(
+      "[data-inconsistency-ids], [data-change-id]"
+    )).filter((element) => {
+      const belongsToInconsistency =
+        element.dataset.inconsistencyRole !== "sentence" &&
+        element.dataset.inconsistencyIds?.split(" ").includes(item.id);
+      const belongsToChange = Boolean(
+        element.dataset.changeId && relatedChangeIds.has(element.dataset.changeId)
+      );
+      const rect = element.getBoundingClientRect();
+      return (belongsToInconsistency || belongsToChange) && (
+        direction === "above" ? rect.bottom < viewport.top : rect.top > viewport.bottom
+      );
+    });
+    const target = candidates.reduce<HTMLElement | null>((closest, candidate) => {
+      if (!closest) return candidate;
+      const closestRect = closest.getBoundingClientRect();
+      const candidateRect = candidate.getBoundingClientRect();
+      return direction === "above"
+        ? candidateRect.bottom > closestRect.bottom ? candidate : closest
+        : candidateRect.top < closestRect.top ? candidate : closest;
+    }, null);
+    target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  }
+
   function handleInconsistencyHover(inconsistencyId: string | null) {
     const editedInconsistencyId = freeEditInconsistencyIdRef.current;
     if (editedInconsistencyId) {
@@ -5310,6 +5355,7 @@ function deserialize(
     if (!(target instanceof HTMLElement)) return false;
     return Boolean(
       target.closest(".free-edit-checkbar") ||
+      target.closest(".offscreen-inconsistency-marker") ||
       target.closest("[data-slate-editor='true']") ||
       target === editorScrollRef.current
     );
@@ -5770,7 +5816,14 @@ function deserialize(
                   key={marker.index}
                   direction="above"
                   marker={marker}
-                  onClick={() => focusInconsistency(marker.index, true, false, "editor_offscreen_marker")}
+                  selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  onClick={() => {
+                    logStudyEvent("editor_marker_clicked", {
+                      inconsistency_id: navigationItems[marker.index]?.id,
+                      location: "above",
+                    });
+                    focusOffscreenInconsistency(marker.index, "above");
+                  }}
                 />
               ))}
             </div>
@@ -5782,7 +5835,14 @@ function deserialize(
                   key={marker.index}
                   direction="below"
                   marker={marker}
-                  onClick={() => focusInconsistency(marker.index, true, false, "editor_offscreen_marker")}
+                  selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  onClick={() => {
+                    logStudyEvent("editor_marker_clicked", {
+                      inconsistency_id: navigationItems[marker.index]?.id,
+                      location: "below",
+                    });
+                    focusOffscreenInconsistency(marker.index, "below");
+                  }}
                 />
               ))}
             </div>
@@ -6342,10 +6402,12 @@ const offscreenMarkerSizeHistory = new Map<string, { size: number; updatedAt: nu
 function OffscreenMarker({
   direction,
   marker,
+  selected,
   onClick,
 }: {
   direction: "above" | "below";
   marker: OffscreenInconsistency;
+  selected: boolean;
   onClick: () => void;
 }) {
   const markerSize = Math.max(32, marker.occurrenceCount * 16 + 8);
@@ -6379,13 +6441,14 @@ function OffscreenMarker({
   return (
     <button
       type="button"
-      className={`offscreen-inconsistency-marker offscreen-inconsistency-marker--${direction} offscreen-inconsistency-marker--${marker.severity}${marker.successful ? " offscreen-inconsistency-marker--success" : ""}`}
+      className={`offscreen-inconsistency-marker offscreen-inconsistency-marker--${direction} offscreen-inconsistency-marker--${marker.severity}${marker.successful ? " offscreen-inconsistency-marker--success" : ""}${selected ? " offscreen-inconsistency-marker--selected" : ""}`}
       style={{
         left: `${marker.edgeOffset}px`,
         "--marker-opacity": marker.opacity,
         "--marker-size": `${displayedMarkerSize}px`,
       } as React.CSSProperties}
       onClick={onClick}
+      aria-pressed={selected}
       aria-label={`${label}. Scroll to this inconsistency.`}
     >
       <span className="offscreen-inconsistency-marker-icon" aria-hidden="true">{marker.emoji}</span>
