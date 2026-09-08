@@ -1775,9 +1775,9 @@
   gap: 7px;
   min-height: 38px;
   padding: 8px 10px;
-  border-color: #22c55e;
-  background: #f0fdf4;
-  color: #14532d;
+  border-color: #a8adb9;
+  background: #f7f7f8;
+  color: #3f4654;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -2103,6 +2103,34 @@
 .tracked-change-card--accepted {
   border-color: #22c55e;
   background: #f0fdf4;
+}
+
+.tracked-change-card--pending,
+.tracked-change-dialog--minimized.tracked-change-card--pending {
+  border-color: #a8adb9;
+  background: #f7f7f8;
+  color: #3f4654;
+}
+
+.tracked-change-dialog--minimized.tracked-change-card--pending:hover,
+.tracked-change-dialog--minimized.tracked-change-card--pending:focus-visible {
+  border-color: #7d8492;
+  background: #eceef1;
+  outline-color: rgb(125 132 146 / 28%);
+}
+
+.tracked-change-card--invalid,
+.tracked-change-dialog--minimized.tracked-change-card--invalid {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.tracked-change-dialog--minimized.tracked-change-card--invalid:hover,
+.tracked-change-dialog--minimized.tracked-change-card--invalid:focus-visible {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  outline-color: rgb(220 38 38 / 28%);
 }
 
 @keyframes tracked-insertion-slide {

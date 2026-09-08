@@ -67,6 +67,7 @@ type CustomText = {
   changeType?: "insertion" | "deletion";
   changeAccepted?: boolean;
   confirmedCorrect?: boolean;
+  reopenedInconsistencyId?: string;
 };
 
 type TrackedChange = {
@@ -111,6 +112,7 @@ type CharacterDecision = {
   evidenceIndices: number[];
   contexts: Array<{ before: string; original: string; replacement: string; after: string }>;
   beforeBlocks: Array<{ paragraphIndex: number; block: Descendant }>;
+  status: "pending" | "valid" | "invalid";
 };
 
 type LinkElement = {
@@ -408,6 +410,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     rememberedRanges: BaseRange[];
     markerRanges: BaseRange[];
     locallyRemainingCount?: number;
+    decisionId?: string;
+    evidenceIndices?: number[];
   } | null>(null);
   const [inconsistentPaths, setInconsistentPaths] = useState<InconsistentPath[]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
@@ -675,6 +679,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
   const [factPreviewConnections, setFactPreviewConnections] =
     useState<FactPreviewConnection[]>([]);
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
+  const [reopenedFactChangeIds, setReopenedFactChangeIds] =
+    useState<Set<string>>(() => new Set());
   const [finalizingChangeIds, setFinalizingChangeIds] =
     useState<Set<string>>(() => new Set());
   const [finalizingInsertionOnlyChangeIds, setFinalizingInsertionOnlyChangeIds] =
@@ -1814,6 +1820,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     setConfirmedPositionKeys(new Set());
     setDependentPassages([]);
     setTrackedChanges([]);
+    setReopenedFactChangeIds(new Set());
     setExpandedTrackedChangeId(null);
     setVerifiedMarkerResults(new Map());
     setSuccessfulInconsistencyId(null);
@@ -2894,6 +2901,7 @@ function deserialize(
 
   function getAffectedFactPositions(inconsistency: Inconsistency): AffectedFactPosition[] {
     const positions = new Map<string, AffectedFactPosition>();
+    const inconsistencyId = getStableInconsistencyId(inconsistency);
 
     for (const fact of getAllAffectedFacts(inconsistency)) {
       const paragraphIndex = getFactParagraphIndex(editor, fact);
@@ -2901,7 +2909,18 @@ function deserialize(
       if (paragraphIndex === null || !pattern) continue;
 
       for (const [node, path] of SlateNode.texts(editor)) {
-        if (path[0] !== paragraphIndex || node.changeType || node.confirmedCorrect) continue;
+        const isReopenedInsertion = node.changeType === "insertion" && Boolean(
+          node.changeId && (
+            node.reopenedInconsistencyId === inconsistencyId ||
+            reopenedFactChangeIds.has(node.changeId)
+          )
+        );
+        if (
+          path[0] !== paragraphIndex ||
+          node.confirmedCorrect ||
+          node.changeType === "deletion" ||
+          (node.changeType === "insertion" && !isReopenedInsertion)
+        ) continue;
         for (const match of node.text.matchAll(pattern)) {
           if (match.index === undefined || match[0].length === 0) continue;
           const sourceParagraphMatches = fact.source?.paragraphIndex === paragraphIndex;
@@ -2932,7 +2951,6 @@ function deserialize(
       }
     }
 
-    const inconsistencyId = getStableInconsistencyId(inconsistency);
     const dependentPositions = dependentPassages.flatMap((passage) => {
       if (passage.inconsistencyId !== inconsistencyId) return [];
       const range = passage.rangeRef.current;
@@ -2955,8 +2973,42 @@ function deserialize(
       return [{ fact: passage.fact, range, previewText: passage.text }];
     });
 
+    // A direct replacement that failed re-analysis is already represented by
+    // a staged insertion leaf. Add that leaf explicitly instead of trying to
+    // rediscover it through source offsets/pattern matching, which may still
+    // describe the pre-edit value and therefore miss the replacement.
+    const reopenedChangePositions = trackedChanges.flatMap((change) => {
+      if (
+        !reopenedFactChangeIds.has(change.id) ||
+        getStableInconsistencyId(change.inconsistency) !== inconsistencyId
+      ) return [];
+      return Array.from(Editor.nodes(editor, {
+        at: [],
+        match: (node) =>
+          Text.isText(node) &&
+          node.changeId === change.id &&
+          node.changeType === "insertion",
+      })).flatMap(([node, path]): AffectedFactPosition[] => {
+        if (!Text.isText(node) || node.text.length === 0) return [];
+        const paragraphIndex = path[0];
+        const fact = inconsistency.facts.find((candidate) =>
+          candidate.source?.paragraphIndex === paragraphIndex &&
+          factValueAppearsInText(node.text, candidate.object ?? candidate.value)
+        ) ?? inconsistency.facts.find((candidate) =>
+          candidate.source?.paragraphIndex === paragraphIndex
+        ) ?? inconsistency.facts.at(-1);
+        if (!fact) return [];
+        const block = editor.children[paragraphIndex];
+        return [{
+          fact,
+          range: Editor.range(editor, path),
+          previewText: block ? getEditorText([block]).trim() : node.text,
+        }];
+      });
+    });
+
     const mergedPositions = Array.from(positions.values());
-    dependentPositions.forEach((dependentPosition) => {
+    [...dependentPositions, ...reopenedChangePositions].forEach((dependentPosition) => {
       const isDuplicate = mergedPositions.some((existingPosition) => {
         const samePassageText = Boolean(
           existingPosition.previewText &&
@@ -3332,6 +3384,7 @@ function deserialize(
       {
         id: changeId,
         inconsistency,
+        source: "direct",
         replacement,
         replacedValues: Array.from(replacedValues),
         occurrenceCount: occurrences.length,
@@ -3395,10 +3448,31 @@ function deserialize(
     setSuggestionDraft("");
     setDocument([...editor.children]);
     if (ENABLE_AI_CHANGE_ACCEPT_CHECK) {
+      const inconsistencyId = getStableInconsistencyId(inconsistency);
+      // Keep the edited passage visible until the asynchronous check has
+      // decided whether this concrete replacement resolves the issue.
+      setReopenedFactChangeIds((current) => new Set([...current, changeId]));
+      Editor.withoutNormalizing(editor, () => {
+        for (const [node, path] of Editor.nodes(editor, {
+          at: [],
+          match: (candidate) =>
+            Text.isText(candidate) &&
+            candidate.changeId === changeId &&
+            candidate.changeType === "insertion",
+        })) {
+          if (!Text.isText(node)) continue;
+          Transforms.setNodes<CustomText>(
+            editor,
+            { reopenedInconsistencyId: inconsistencyId },
+            { at: path }
+          );
+        }
+      });
       await reevaluateParagraphs(
         Array.from(new Set(occurrences.map((range) => range.anchor.path[0]))),
         inconsistency,
-        occurrences
+        occurrences,
+        [changeId]
       );
     }
   }
@@ -3597,6 +3671,7 @@ function deserialize(
       evidenceIndices: [evidenceIndex],
       contexts: [{ before: "", original: evidence.quote, replacement: evidence.quote, after: "" }],
       beforeBlocks: [],
+      status: "valid",
     }]);
     setExpandedTrackedChangeId(decisionId);
     setDocument([...editor.children]);
@@ -3636,16 +3711,28 @@ function deserialize(
   }
 
   function revertCharacterDecision(decision: CharacterDecision) {
+    const restoreScrollPosition = captureEditorScrollPosition();
+    Transforms.deselect(editor);
     Editor.withoutNormalizing(editor, () => {
       if (decision.source === "free") {
-        [...decision.beforeBlocks]
-          .sort((first, second) => second.paragraphIndex - first.paragraphIndex)
-          .forEach(({ paragraphIndex, block }) => {
-            if (editor.children[paragraphIndex]) {
-              Transforms.removeNodes(editor, { at: [paragraphIndex] });
-            }
-            Transforms.insertNodes(editor, structuredClone(block), { at: [paragraphIndex] });
-          });
+        // Reverse only the staged diff leaves. Replacing the complete block
+        // here made Slate recreate the paragraph DOM and caused pagination and
+        // the browser's scroll anchor to jump to a different page.
+        for (const [node, path] of Array.from(Editor.nodes(editor, {
+          at: [],
+          match: (candidate) => Text.isText(candidate) && candidate.changeId === decision.id,
+        })).sort(([, first], [, second]) => Path.compare(second, first))) {
+          if (!Text.isText(node)) continue;
+          if (node.changeType === "insertion") {
+            Transforms.removeNodes(editor, { at: path });
+          } else {
+            Transforms.unsetNodes(
+              editor,
+              ["changeId", "changeType", "changeAccepted", "reopenedInconsistencyId"],
+              { at: path }
+            );
+          }
+        }
       } else {
         for (const [, path] of Array.from(Editor.nodes(editor, {
           at: [],
@@ -3677,6 +3764,12 @@ function deserialize(
     });
     setCharacterDecisions((decisions) => decisions.filter(({ id }) => id !== decision.id));
     setExpandedTrackedChangeId((current) => current === decision.id ? null : current);
+    const restoredCharacterInconsistencies = characterInconsistencies.map((candidate) =>
+      isSameCharacterInconsistency(candidate, decision.inconsistency)
+        ? decision.inconsistency
+        : candidate
+    );
+    setCharacterInconsistencies(restoredCharacterInconsistencies);
     if (successfulInconsistencyIdRef.current === issueId) {
       setSuccessfulInconsistencyId(null);
       successfulInconsistencyIdRef.current = null;
@@ -3689,7 +3782,31 @@ function deserialize(
     setActiveInconsistencyId(issueId);
     setSelectedInconsistencyId(issueId);
     selectedInconsistencyIdRef.current = issueId;
+    setInconsistentPaths([
+      ...getInconsistentPaths(editor, inconsistencies),
+      ...getCharacterInconsistentPaths(restoredCharacterInconsistencies, inconsistencies.length),
+    ]);
+    setInconsistentRanges([
+      ...getInconsistentTextRanges(editor, inconsistencies),
+      ...getCharacterInconsistentTextRanges(editor, restoredCharacterInconsistencies),
+    ]);
     setDocument([...editor.children]);
+    // Replacing a complete Slate block causes its text-leaf paths to settle
+    // during normalization. Rebuild decorations once more on the next frame
+    // from the restored document, otherwise the card can already list the
+    // passage while its range still points at the removed edited leaves.
+    requestAnimationFrame(() => {
+      setInconsistentPaths([
+        ...getInconsistentPaths(editor, inconsistencies),
+        ...getCharacterInconsistentPaths(restoredCharacterInconsistencies, inconsistencies.length),
+      ]);
+      setInconsistentRanges([
+        ...getInconsistentTextRanges(editor, inconsistencies),
+        ...getCharacterInconsistentTextRanges(editor, restoredCharacterInconsistencies),
+      ]);
+      setDocument([...editor.children]);
+    });
+    restoreScrollPosition();
   }
 
   function isSameInconsistency(first: Inconsistency, second: Inconsistency) {
@@ -3744,7 +3861,8 @@ function deserialize(
   async function reevaluateParagraphs(
     paragraphIndices: number[],
     checkedInconsistency?: Inconsistency,
-    rememberedRanges: BaseRange[] = []
+    rememberedRanges: BaseRange[] = [],
+    candidateChangeIds: string[] = []
   ) {
     if (!analysis || paragraphIndices.length === 0) {
       return;
@@ -3870,8 +3988,62 @@ function deserialize(
             isSameInconsistency(item, checkedInconsistency)
           )
         : undefined;
+      const relevantChangeIds = new Set(
+        checkedId
+          ? [
+              ...candidateChangeIds,
+              ...trackedChanges
+              .filter((change) =>
+                change.source !== "confirmed" &&
+                getStableInconsistencyId(change.inconsistency) === checkedId &&
+                change.paragraphIndices.some((index) => paragraphIndices.includes(index))
+              )
+              .map((change) => change.id),
+            ]
+          : []
+      );
       if (checkedId && refreshedCheckedInconsistency) {
         stableInconsistencyIds.set(refreshedCheckedInconsistency, checkedId);
+        // The accepted replacement itself can be the newly conflicting fact
+        // (for example 39 -> 35 while 32 remains confirmed). Reopen only its
+        // insertion leaf so it returns to the affected-passage list without
+        // discarding the old/new diff presentation.
+        setReopenedFactChangeIds((current) => new Set([
+          ...current,
+          ...relevantChangeIds,
+        ]));
+        Editor.withoutNormalizing(editor, () => {
+          for (const [node, path] of Editor.nodes(editor, {
+            at: [],
+            match: (candidate) =>
+              Text.isText(candidate) &&
+              candidate.changeType === "insertion" &&
+              Boolean(candidate.changeId && relevantChangeIds.has(candidate.changeId)),
+          })) {
+            if (!Text.isText(node)) continue;
+            Transforms.setNodes<CustomText>(
+              editor,
+              { reopenedInconsistencyId: checkedId },
+              { at: path }
+            );
+          }
+        });
+      } else if (relevantChangeIds.size > 0) {
+        setReopenedFactChangeIds((current) => {
+          const next = new Set(current);
+          relevantChangeIds.forEach((id) => next.delete(id));
+          return next;
+        });
+        Editor.withoutNormalizing(editor, () => {
+          for (const [, path] of Editor.nodes(editor, {
+            at: [],
+            match: (candidate) =>
+              Text.isText(candidate) &&
+              Boolean(candidate.changeId && relevantChangeIds.has(candidate.changeId)),
+          })) {
+            Transforms.unsetNodes(editor, "reopenedInconsistencyId", { at: path });
+          }
+        });
       }
       // The card and the editor must use the same observable completion
       // criterion. An AI result that contains an issue but no longer maps to
@@ -3879,11 +4051,17 @@ function deserialize(
       const locallyRemainingOccurrenceCount = checkedInconsistency
         ? getAffectedFactPositions(checkedInconsistency).length
         : 0;
+      const refreshedMappedRanges = refreshedCheckedInconsistency && checkedId
+        ? getInconsistentTextRanges(editor, [refreshedCheckedInconsistency], checkedId)
+        : [];
       const refreshedOccurrenceCount = refreshedCheckedInconsistency
-        ? getAffectedFactPositions(refreshedCheckedInconsistency).length
+        ? Math.max(
+            getAffectedFactPositions(refreshedCheckedInconsistency).length,
+            new Set(refreshedMappedRanges.map((range) => range.anchor.path[0])).size
+          )
         : 0;
       const isResolved = checkedInconsistency
-        ? locallyRemainingOccurrenceCount === 0 && refreshedOccurrenceCount === 0
+        ? locallyRemainingOccurrenceCount === 0 && !refreshedCheckedInconsistency
         : false;
       const reconciledInconsistencies = reconcileReevaluation(
         updatedInconsistencies,
@@ -3893,7 +4071,7 @@ function deserialize(
       );
       if (checkedId) {
         const nextOccurrenceCount = refreshedCheckedInconsistency
-          ? getAffectedFactPositions(refreshedCheckedInconsistency).length
+          ? refreshedOccurrenceCount
           : locallyRemainingOccurrenceCount;
         publishVerifiedMarkerResult(
           checkedId,
@@ -4039,7 +4217,9 @@ function deserialize(
     checkedInconsistency: CharacterInconsistency,
     rememberedRanges: BaseRange[] = [],
     locallyRemainingCount?: number,
-    markerRanges: BaseRange[] = rememberedRanges
+    markerRanges: BaseRange[] = rememberedRanges,
+    decisionId?: string,
+    evidenceIndices: number[] = []
   ) {
     const checkedId = getStableCharacterInconsistencyId(checkedInconsistency);
     const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
@@ -4090,6 +4270,15 @@ function deserialize(
       ]);
 
       if (!refreshed) {
+        if (decisionId) {
+          setCharacterDecisions((decisions) => decisions.map((decision) =>
+            decision.id === decisionId ? { ...decision, status: "valid" } : decision
+          ));
+          setHandledCharacterEvidenceKeys((current) => new Set([
+            ...current,
+            ...evidenceIndices.map((index) => `${checkedId}:${index}`),
+          ]));
+        }
         const fallbackRanges = rememberedRanges.length > 0
           ? rememberedRanges
           : getCharacterInconsistentTextRanges(editor, [checkedInconsistency]);
@@ -4114,6 +4303,36 @@ function deserialize(
           ...successfulRanges,
         ]);
       } else {
+        if (decisionId) {
+          const editedEvidence = evidenceIndices.flatMap((index) => {
+            const evidence = checkedInconsistency.evidence[index];
+            return evidence ? [evidence] : [];
+          });
+          const tokenOverlap = (first: string, second: string) => {
+            const firstTokens = normalizeSearchText(first).split(" ").filter(Boolean);
+            const secondTokens = new Set(normalizeSearchText(second).split(" ").filter(Boolean));
+            if (firstTokens.length === 0) return 0;
+            return firstTokens.filter((token) => secondTokens.has(token)).length / firstTokens.length;
+          };
+          const refreshedStillTargetsEditedPassage = editedEvidence.some((originalEvidence) =>
+            refreshed.evidence.some((newEvidence) =>
+              newEvidence.paragraphIndex === originalEvidence.paragraphIndex &&
+              tokenOverlap(originalEvidence.quote, newEvidence.quote) >= 0.55
+            )
+          );
+          setCharacterDecisions((decisions) => decisions.map((decision) =>
+            decision.id === decisionId
+              ? { ...decision, status: refreshedStillTargetsEditedPassage ? "invalid" : "valid" }
+              : decision
+          ));
+          if (refreshedStillTargetsEditedPassage) {
+            setHandledCharacterEvidenceKeys((current) => {
+              const next = new Set(current);
+              evidenceIndices.forEach((index) => next.delete(`${checkedId}:${index}`));
+              return next;
+            });
+          }
+        }
         setSuccessfulInconsistencyId(null);
         successfulInconsistencyIdRef.current = null;
         setPendingResolvedCharacterInconsistencies(null);
@@ -4177,6 +4396,8 @@ function deserialize(
           rememberedRanges,
           markerRanges,
           locallyRemainingCount,
+          decisionId,
+          evidenceIndices,
         });
         setCharacterAnalysisError(
           "The AI provider is temporarily unavailable. Your change and the open inconsistency have been preserved. Please retry the evaluation."
@@ -4334,6 +4555,9 @@ function deserialize(
     change: TrackedChange,
     action: "accept" | "reject"
   ) {
+    const restoreScrollPosition = action === "reject"
+      ? captureEditorScrollPosition()
+      : null;
     const inconsistencyId = getStableInconsistencyId(change.inconsistency);
     logStudyEvent(action === "accept" ? "suggestion_accepted" : "suggestion_rejected", {
       inconsistency_id: inconsistencyId,
@@ -4370,7 +4594,7 @@ function deserialize(
         } else {
           Transforms.unsetNodes(
             editor,
-            ["changeId", "changeType", "changeAccepted", "confirmedCorrect"],
+            ["changeId", "changeType", "changeAccepted", "confirmedCorrect", "reopenedInconsistencyId"],
             { at: path }
           );
         }
@@ -4383,6 +4607,13 @@ function deserialize(
         : candidate)
       : changes.filter(({ id }) => id !== change.id)
     );
+    if (action === "reject") {
+      setReopenedFactChangeIds((current) => {
+        const next = new Set(current);
+        next.delete(change.id);
+        return next;
+      });
+    }
     setDocument([...editor.children]);
 
     if (action === "reject") {
@@ -4401,6 +4632,15 @@ function deserialize(
         previousMarkerCount + Math.max(1, change.occurrenceCount)
       );
       resolvedInconsistencyIdsRef.current.delete(inconsistencyId);
+      // Re-analysis may have replaced the card's original fact (for example
+      // 39) with the rejected candidate (36). Once the candidate is removed,
+      // restore the original issue as well so its passage can be found again.
+      const restoredInconsistencies = inconsistencies.map((candidate) =>
+        isSameInconsistency(candidate, change.inconsistency)
+          ? change.inconsistency
+          : candidate
+      );
+      setInconsistencies(restoredInconsistencies);
       if (successfulInconsistencyIdRef.current === inconsistencyId) {
         setSuccessfulInconsistencyId(null);
         successfulInconsistencyIdRef.current = null;
@@ -4421,6 +4661,26 @@ function deserialize(
       setActiveInconsistencyId(inconsistencyId);
       setSelectedInconsistencyId(inconsistencyId);
       selectedInconsistencyIdRef.current = inconsistencyId;
+      setInconsistentPaths([
+        ...getInconsistentPaths(editor, restoredInconsistencies),
+        ...getCharacterInconsistentPaths(characterInconsistencies, restoredInconsistencies.length),
+      ]);
+      setInconsistentRanges([
+        ...getInconsistentTextRanges(editor, restoredInconsistencies),
+        ...getCharacterInconsistentTextRanges(editor, characterInconsistencies),
+      ]);
+      requestAnimationFrame(() => {
+        setInconsistentPaths([
+          ...getInconsistentPaths(editor, restoredInconsistencies),
+          ...getCharacterInconsistentPaths(characterInconsistencies, restoredInconsistencies.length),
+        ]);
+        setInconsistentRanges([
+          ...getInconsistentTextRanges(editor, restoredInconsistencies),
+          ...getCharacterInconsistentTextRanges(editor, characterInconsistencies),
+        ]);
+        setDocument([...editor.children]);
+      });
+      restoreScrollPosition?.();
     }
 
     const rememberedRanges = change.affectedRangeRefs.flatMap((rangeRef) => {
@@ -4452,6 +4712,19 @@ function deserialize(
         setActiveInconsistencyId(inconsistencyId);
         setSelectedInconsistencyId(inconsistencyId);
         selectedInconsistencyIdRef.current = inconsistencyId;
+        return;
+      }
+
+      // Direct replacements must be validated against the unchanged facts as
+      // well. For example, confirming age 32 and replacing 39 with 35 still
+      // leaves a 32/35 contradiction; marker completion alone is not proof
+      // that the underlying fact inconsistency has been resolved.
+      if (ENABLE_AI_CHANGE_ACCEPT_CHECK) {
+        await reevaluateParagraphs(
+          change.paragraphIndices,
+          change.inconsistency,
+          rememberedRanges
+        );
         return;
       }
 
@@ -4722,7 +4995,9 @@ function deserialize(
           if (changedRangeRefs.has(rangeRef)) markerRanges.push(range);
         });
       });
-      setHandledCharacterEvidenceKeys(handledAfterChange);
+      if (!ENABLE_AI_CHANGE_ACCEPT_CHECK) {
+        setHandledCharacterEvidenceKeys(handledAfterChange);
+      }
       setCharacterDecisions((decisions) => [...decisions, {
         id: decisionId,
         inconsistency: freeEditCharacterInconsistency,
@@ -4730,6 +5005,7 @@ function deserialize(
         evidenceIndices: [...freeEditCharacterEvidenceIndices],
         contexts: decisionContexts,
         beforeBlocks,
+        status: ENABLE_AI_CHANGE_ACCEPT_CHECK ? "pending" : "valid",
       }]);
       setExpandedTrackedChangeId(decisionId);
       setFreeEditCharacterEvidenceIndices([]);
@@ -4781,7 +5057,9 @@ function deserialize(
                 (_, evidenceIndex) => !handledAfterChange.has(`${targetId}:${evidenceIndex}`)
               ).length
             : 0,
-          markerRanges.length > 0 ? markerRanges : rememberedRanges
+          markerRanges.length > 0 ? markerRanges : rememberedRanges,
+          decisionId,
+          freeEditCharacterEvidenceIndices
         );
       }
       return;
@@ -4987,7 +5265,7 @@ function deserialize(
             } else {
               Transforms.unsetNodes(
                 editor,
-                ["changeId", "changeType", "changeAccepted", "confirmedCorrect"],
+                ["changeId", "changeType", "changeAccepted", "confirmedCorrect", "reopenedInconsistencyId"],
                 { at: path }
               );
             }
@@ -4997,6 +5275,11 @@ function deserialize(
       setTrackedChanges((changes) => changes.filter((change) =>
         !acceptedChanges.some((accepted) => accepted.id === change.id)
       ));
+      setReopenedFactChangeIds((current) => {
+        const next = new Set(current);
+        acceptedChanges.forEach((change) => next.delete(change.id));
+        return next;
+      });
       setFinalizingChangeIds(new Set());
       setFinalizingInsertionOnlyChangeIds(new Set());
       setDocument([...editor.children]);
@@ -5017,7 +5300,7 @@ function deserialize(
           } else {
             Transforms.unsetNodes(
               editor,
-              ["changeId", "changeType", "changeAccepted", "confirmedCorrect"],
+              ["changeId", "changeType", "changeAccepted", "confirmedCorrect", "reopenedInconsistencyId"],
               { at: path }
             );
           }
@@ -5901,6 +6184,9 @@ function deserialize(
           const affectedPositions = getAffectedFactPositions(inconsistency);
           const verifiedOccurrenceCount = verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount;
           const isReevaluating = incrementalRecheckActive && activeInconsistencyId === inconsistencyId;
+          const hasInvalidTrackedChange = !isReevaluating && cardTrackedChanges.some(
+            (change) => reopenedFactChangeIds.has(change.id)
+          );
           const isResolutionReady = !isReevaluating && successfulInconsistencyId === inconsistencyId &&
             (verifiedOccurrenceCount ?? affectedPositions.length) === 0 &&
             affectedPositions.length === 0;
@@ -5984,7 +6270,7 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-edit"
                       onClick={() => openSuggestionEditor(inconsistency, positionIndex)}
-                      disabled={isResolutionReady}
+                      disabled={isResolutionReady || hasInvalidTrackedChange}
                     >
                       Edit
                     </button>
@@ -5992,7 +6278,7 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-confirm"
                       onClick={() => confirmAffectedPosition(inconsistency, position)}
-                      disabled={isResolutionReady}
+                      disabled={isResolutionReady || hasInvalidTrackedChange}
                     >
                       Looks good
                     </button>
@@ -6069,6 +6355,8 @@ function deserialize(
                   key={change.id}
                   expanded={expandedTrackedChangeId === change.id}
                   change={change}
+                  pending={isReevaluating && change.source !== "confirmed"}
+                  invalid={!isReevaluating && reopenedFactChangeIds.has(change.id)}
                   onToggle={() => setExpandedTrackedChangeId((current) =>
                     current === change.id ? null : change.id
                   )}
@@ -6109,7 +6397,9 @@ function deserialize(
                   characterReevaluationRetry.inconsistency,
                   characterReevaluationRetry.rememberedRanges,
                   characterReevaluationRetry.locallyRemainingCount,
-                  characterReevaluationRetry.markerRanges
+                  characterReevaluationRetry.markerRanges,
+                  characterReevaluationRetry.decisionId,
+                  characterReevaluationRetry.evidenceIndices
                 )}
                 disabled={analyzing}
               >
@@ -6139,6 +6429,9 @@ function deserialize(
             !handledCharacterEvidenceKeys.has(`${issueId}:${evidenceIndex}`)
           ).length;
           const isReevaluating = incrementalRecheckActive && activeInconsistencyId === issueId;
+          const hasInvalidCharacterChange = !isReevaluating && issueDecisions.some(
+            (decision) => decision.status === "invalid"
+          );
           const isResolutionReady = !isReevaluating && successfulInconsistencyId === issueId &&
             (verifiedOccurrenceCount ?? remainingEvidenceCount) === 0 &&
             remainingEvidenceCount === 0;
@@ -6207,7 +6500,7 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-edit"
                       onClick={() => beginCharacterFreeEditing(issue, evidenceIndex)}
-                      disabled={isResolutionReady}
+                      disabled={isResolutionReady || hasInvalidCharacterChange}
                     >
                       Edit
                     </button>
@@ -6215,7 +6508,7 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-confirm"
                       onClick={() => confirmCharacterEvidence(issue, evidenceIndex)}
-                      disabled={isResolutionReady}
+                      disabled={isResolutionReady || hasInvalidCharacterChange}
                     >
                       Looks good
                     </button>
@@ -6290,13 +6583,25 @@ function CharacterDecisionDialog({ expanded, decision, onToggle, onReject }: {
   decision: CharacterDecision; onToggle: () => void; onReject: () => void;
 }) {
   const title = decision.source === "confirmed" ? "Confirmed Passage" : "Tracked Change";
+  const stateClass = decision.source === "confirmed" || decision.status === "valid"
+    ? "tracked-change-card--accepted"
+    : decision.status === "invalid"
+      ? "tracked-change-card--invalid"
+      : "tracked-change-card--pending";
+  const stateMessage = decision.source === "confirmed"
+    ? "This character passage was marked as correct."
+    : decision.status === "pending"
+      ? "This change is being checked. Its result is not yet known."
+      : decision.status === "invalid"
+        ? "Re-analysis found that this change does not resolve the character inconsistency. Revert it and edit the original passage again."
+        : "This character passage was edited freely and passed re-analysis.";
   return expanded ? (
-    <aside className="tracked-change-dialog tracked-change-dialog--inline tracked-change-card--accepted">
+    <aside className={`tracked-change-dialog tracked-change-dialog--inline ${stateClass}`}>
       <div className="tracked-change-dialog-header">
         <strong className="tracked-change-dialog-title">{title} · Character Continuity</strong>
         <button type="button" onClick={onToggle} aria-label="Collapse dialog">−</button>
       </div>
-      <p>{decision.source === "confirmed" ? "This character passage was marked as correct." : "This character passage was edited freely."}</p>
+      <p>{stateMessage}</p>
       <div className="tracked-change-contexts">
         {decision.contexts.map((context, index) => <div className="tracked-change-context" key={index}>
           <span>{context.before}</span>
@@ -6304,10 +6609,10 @@ function CharacterDecisionDialog({ expanded, decision, onToggle, onReject }: {
           <span>{context.after}</span>
         </div>)}
       </div>
-      <div className="tracked-change-actions"><button type="button" onClick={onReject}>Revert decision</button></div>
+      <div className="tracked-change-actions"><button type="button" onClick={onReject} disabled={decision.status === "pending"}>Revert decision</button></div>
     </aside>
   ) : (
-    <button type="button" className="tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized tracked-change-card--accepted" onClick={onToggle}>
+    <button type="button" className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized ${stateClass}`} onClick={onToggle}>
       <strong>{title}</strong><span>Character Continuity</span>
     </button>
   );
@@ -6316,6 +6621,8 @@ function CharacterDecisionDialog({ expanded, decision, onToggle, onReject }: {
 function TrackedChangeDialog({
   expanded,
   change,
+  pending,
+  invalid,
   onToggle,
   onNavigateContext,
   onAccept,
@@ -6323,6 +6630,8 @@ function TrackedChangeDialog({
 }: {
   expanded: boolean;
   change: TrackedChange;
+  pending: boolean;
+  invalid: boolean;
   onToggle: () => void;
   onNavigateContext: (contextIndex: number) => void;
   onAccept: () => void;
@@ -6335,7 +6644,7 @@ function TrackedChangeDialog({
   return !expanded ? (
       <button
         type="button"
-        className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized${change.accepted ? " tracked-change-card--accepted" : ""}`}
+        className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized${invalid ? " tracked-change-card--invalid" : pending ? " tracked-change-card--pending" : change.accepted ? " tracked-change-card--accepted" : ""}`}
         onClick={onToggle}
         title={`Expand ${shortTitle}`}
         aria-expanded="false"
@@ -6345,7 +6654,7 @@ function TrackedChangeDialog({
       </button>
     ) : (
     <aside
-      className={`tracked-change-dialog tracked-change-dialog--inline${change.accepted ? " tracked-change-card--accepted" : ""}`}
+      className={`tracked-change-dialog tracked-change-dialog--inline${invalid ? " tracked-change-card--invalid" : pending ? " tracked-change-card--pending" : change.accepted ? " tracked-change-card--accepted" : ""}`}
       aria-label="Tracked change"
     >
       <div className="tracked-change-dialog-header">
@@ -6353,7 +6662,11 @@ function TrackedChangeDialog({
         <button type="button" onClick={onToggle} aria-label="Collapse dialog">−</button>
       </div>
       <p>
-        {change.source === "confirmed"
+        {pending
+          ? "This change is being checked. Its result is not yet known."
+          : invalid
+          ? "Re-analysis found that this change is still inconsistent. Remove it before editing the original passage again."
+          : change.source === "confirmed"
           ? "This passage was marked as correct without changing the text."
           : change.source === "free"
           ? `Free edit in ${change.occurrenceCount} ${change.occurrenceCount === 1 ? "passage" : "passages"}`

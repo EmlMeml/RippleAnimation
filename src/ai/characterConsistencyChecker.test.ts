@@ -5,6 +5,9 @@ import {
   mergeCharacterInconsistencies,
   deduplicateCharacterInconsistencies,
   hasVerifiedCharacterEvidence,
+  preserveTargetAfterModifierOnlyEdit,
+  preserveTargetForDependentMemoryClaim,
+  hasExplicitlyNegatedTargetMemoryClaim,
 } from "./characterConsistencyChecker";
 
 describe("isCharacterConsistencyResponse", () => {
@@ -23,6 +26,75 @@ describe("isCharacterConsistencyResponse", () => {
       confidence: "high", message: "x", explanation: "x", evidence: [],
     }] })).toBe(false);
   });
+});
+
+it("keeps a targeted memory issue open when only an adverb changes", () => {
+  const target = {
+    character: "Eve",
+    category: "memory" as const,
+    kind: "likely_contradiction" as const,
+    confidence: "high" as const,
+    message: "Eve contradicts her prior knowledge of the report.",
+    explanation: "The later passage says she remembers authoring it.",
+    evidence: [
+      { paragraphIndex: 0, quote: "Eve had never seen the Bellwick drainage report.", interpretation: "She does not know it." },
+      { paragraphIndex: 1, quote: "Eve clearly remembered writing and signing the Bellwick drainage report herself the previous winter.", interpretation: "She remembers authoring it." },
+    ],
+  };
+  const text = [
+    target.evidence[0].quote,
+    "Eve definitly remembered writing and signing the Bellwick drainage report herself the previous winter.",
+  ].join("\n");
+
+  const preserved = preserveTargetAfterModifierOnlyEdit(target, text);
+  expect(preserved).not.toBeNull();
+  expect(preserved?.evidence[1].quote).toContain("definitly remembered writing");
+});
+
+it("keeps a memory issue open when a dependent sentence still claims recall", () => {
+  const target = {
+    character: "Sela",
+    category: "memory" as const,
+    kind: "likely_contradiction" as const,
+    confidence: "high" as const,
+    message: "Sela contradicts her earlier knowledge.",
+    explanation: "She later remembers authoring the report.",
+    evidence: [
+      { paragraphIndex: 0, quote: "Sela had never seen the Harton equipment report.", interpretation: "She did not know the report." },
+      { paragraphIndex: 1, quote: "Sela clearly remembered writing and signing the Harton equipment report herself the previous winter.", interpretation: "She remembers authoring it." },
+    ],
+  };
+  const dependent = "She described its contents from memory while they waited for the coordinator to return it on Friday morning.";
+  const text = [
+    target.evidence[0].quote,
+    `Sela clearly didn't remembered writing and signing the Harton equipment report herself the previous winter. ${dependent}`,
+  ].join("\n");
+
+  const preserved = preserveTargetForDependentMemoryClaim(target, text);
+  expect(preserved).not.toBeNull();
+  expect(preserved?.evidence.at(-1)?.quote).toBe(dependent);
+});
+
+it("treats an explicitly negated memory claim as corrected despite verb inflection", () => {
+  const target = {
+    character: "Eve",
+    category: "memory" as const,
+    kind: "likely_contradiction" as const,
+    confidence: "high" as const,
+    message: "Eve contradicts her earlier knowledge.",
+    explanation: "She later remembers authoring the report.",
+    evidence: [
+      { paragraphIndex: 0, quote: "Eve had never seen the Bellwick drainage report.", interpretation: "She did not know it." },
+      { paragraphIndex: 1, quote: "Eve clearly remembered writing and signing the Bellwick drainage report herself the previous winter.", interpretation: "She remembers authoring it." },
+    ],
+  };
+  const corrected = [
+    target.evidence[0].quote,
+    "Eve didn't remembered writing and signing the Bellwick drainage report herself the previous winter.",
+  ].join("\n");
+
+  expect(hasExplicitlyNegatedTargetMemoryClaim(target, corrected)).toBe(true);
+  expect(preserveTargetForDependentMemoryClaim(target, corrected)).toBeNull();
 });
 
 it("detects an explicit never/always contradiction without AI", () => {
