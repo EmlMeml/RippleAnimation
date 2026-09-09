@@ -1377,9 +1377,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
             ? verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount ??
               getAffectedFactPositions(inconsistency).length
             : resolutionReady
-            ? Math.max(1, new Set(
-                successfulRangesRef.current.map((range) => range.anchor.path[0])
-              ).size)
+            ? 1
             : getAffectedFactPositions(inconsistency).length,
           successful: resolutionReady,
           resolutionReady,
@@ -1407,9 +1405,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
             ? verifiedMarkerResults.get(inconsistencyId)?.occurrenceCount ??
               inconsistency.evidence.length - handledEvidenceCount
             : resolutionReady
-            ? Math.max(1, new Set(
-                successfulRangesRef.current.map((range) => range.anchor.path[0])
-              ).size)
+            ? 1
             : inconsistency.evidence.length - handledEvidenceCount,
           successful: resolutionReady,
           resolutionReady,
@@ -1583,14 +1579,31 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     }
 
     const viewport = scrollContainer.getBoundingClientRect();
+    const relatedChangeIds = new Set([
+      ...trackedChanges
+        .filter((change) =>
+          getStableInconsistencyId(change.inconsistency) === activeInconsistencyId
+        )
+        .map((change) => change.id),
+      ...characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === activeInconsistencyId
+        )
+        .map((decision) => decision.id),
+    ]);
     const contextElements = Array.from(
-      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
-    ).filter((element) =>
-      element.dataset.inconsistencyRole !== "sentence" &&
-      element.dataset.inconsistencyIds
-        ?.split(" ")
-        .includes(activeInconsistencyId)
-    );
+      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids], [data-change-id]")
+    ).filter((element) => {
+      const isDecoratedPassage =
+        element.dataset.inconsistencyRole !== "sentence" &&
+        element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId);
+      const isRelatedChange = Boolean(
+        element.dataset.changeId &&
+        relatedChangeIds.has(element.dataset.changeId) &&
+        element.dataset.changeType !== "deletion"
+      );
+      return isDecoratedPassage || isRelatedChange;
+    });
 
     const previews = contextElements.flatMap((element, index): OffscreenFactPreview[] => {
       const rect = element.getBoundingClientRect();
@@ -1644,7 +1657,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     });
 
     setOffscreenFactPreviews(previews.sort((first, second) => first.distance - second.distance));
-  }, [activeInconsistencyId, effectiveHiddenInconsistencyIds, inconsistencyEmojiById]);
+  }, [activeInconsistencyId, characterDecisions, effectiveHiddenInconsistencyIds, inconsistencyEmojiById, trackedChanges]);
 
   const navigateToFactPreview = useCallback((preview: OffscreenFactPreview) => {
     const scrollContainer = editorScrollRef.current;
@@ -1657,15 +1670,34 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       preview_key: preview.key,
     });
 
+    const relatedChangeIds = new Set([
+      ...trackedChanges
+        .filter((change) =>
+          getStableInconsistencyId(change.inconsistency) === activeInconsistencyId
+        )
+        .map((change) => change.id),
+      ...characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === activeInconsistencyId
+        )
+        .map((decision) => decision.id),
+    ]);
     const targets = Array.from(
-      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
-    ).filter((element) =>
-      element.dataset.inconsistencyRole !== "sentence" &&
-      element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId)
-    );
+      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids], [data-change-id]")
+    ).filter((element) => {
+      const isDecoratedPassage =
+        element.dataset.inconsistencyRole !== "sentence" &&
+        element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId);
+      const isRelatedChange = Boolean(
+        element.dataset.changeId &&
+        relatedChangeIds.has(element.dataset.changeId) &&
+        element.dataset.changeType !== "deletion"
+      );
+      return isDecoratedPassage || isRelatedChange;
+    });
     const target = targets[preview.targetIndex];
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [activeInconsistencyId]);
+  }, [activeInconsistencyId, characterDecisions, trackedChanges]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -1702,12 +1734,31 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     const shellRect = shell.getBoundingClientRect();
     const viewport = scrollContainer.getBoundingClientRect();
+    const relatedChangeIds = new Set([
+      ...trackedChanges
+        .filter((change) =>
+          getStableInconsistencyId(change.inconsistency) === activeInconsistencyId
+        )
+        .map((change) => change.id),
+      ...characterDecisions
+        .filter((decision) =>
+          getStableCharacterInconsistencyId(decision.inconsistency) === activeInconsistencyId
+        )
+        .map((decision) => decision.id),
+    ]);
     const relatedElements = Array.from(
-      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids]")
-    ).filter((element) =>
-      element.dataset.inconsistencyRole !== "sentence" &&
-      element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId)
-    );
+      scrollContainer.querySelectorAll<HTMLElement>("[data-inconsistency-ids], [data-change-id]")
+    ).filter((element) => {
+      const isDecoratedPassage =
+        element.dataset.inconsistencyRole !== "sentence" &&
+        element.dataset.inconsistencyIds?.split(" ").includes(activeInconsistencyId);
+      const isRelatedChange = Boolean(
+        element.dataset.changeId &&
+        relatedChangeIds.has(element.dataset.changeId) &&
+        element.dataset.changeType !== "deletion"
+      );
+      return isDecoratedPassage || isRelatedChange;
+    });
     const conflictElement = relatedElements.find((element) => {
       const rect = element.getBoundingClientRect();
       return rect.bottom >= viewport.top && rect.top <= viewport.bottom;
@@ -1759,7 +1810,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         ].join(" "),
       }];
     }));
-  }, [activeInconsistencyId, incrementalRecheckActive, offscreenFactPreviews]);
+  }, [activeInconsistencyId, characterDecisions, incrementalRecheckActive, offscreenFactPreviews, trackedChanges]);
 
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -3575,6 +3626,7 @@ function deserialize(
   }
 
   function cancelFreeEditing() {
+    const returnToDirectReplacement = Boolean(freeEditInconsistency);
     const restoreScrollPosition = captureEditorScrollPosition();
     freeEditDependentPassagesRef.current.forEach((passage) => passage.rangeRef.unref());
     freeEditDependentPassagesRef.current = [];
@@ -3588,6 +3640,7 @@ function deserialize(
     setFreeEditCharacterInconsistency(null);
     setFreeEditCharacterEvidenceIndices([]);
     setFreeEditParagraphs([]);
+    if (returnToDirectReplacement) setSuggestionMode("replace");
     restoreScrollPosition();
   }
 
@@ -5401,6 +5454,10 @@ function deserialize(
   const isFreeEditActive = Boolean(
     freeEditInconsistency || freeEditCharacterInconsistency
   );
+  // Passage editing starts as soon as the card's Edit action opens the
+  // suggestion editor. It remains active when switching to free editing and
+  // ends when that workflow is cancelled, applied, or submitted for checking.
+  const isPassageEditActive = Boolean(suggestionTarget || isFreeEditActive);
 
   useEffect(() => {
     if (!isFreeEditActive) return;
@@ -6002,7 +6059,7 @@ function deserialize(
           {localEditMarker?.markers.map((marker, markerIndex) => (
             <span
               key={marker.key}
-              className={`local-edit-marker local-edit-marker--${localEditMarker.change}${marker.active ? " local-edit-marker--active" : ""}${localEditMarker.visible ? "" : " local-edit-marker--dismissing"}`}
+              className={`local-edit-marker local-edit-marker--${localEditMarker.change}${isPassageEditActive && !incrementalRecheckActive && localEditMarker.change !== "resolved" ? " local-edit-marker--editing" : ""}${localEditMarker.visible ? "" : " local-edit-marker--dismissing"}`}
               style={{
                 left: `${marker.x}px`,
                 top: `${marker.y}px`,

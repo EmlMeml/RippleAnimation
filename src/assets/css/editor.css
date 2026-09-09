@@ -541,8 +541,11 @@
     transform 240ms cubic-bezier(.22, .7, .3, 1);
 }
 
-.local-edit-marker--active {
-  box-shadow: 0 0 0 3px rgb(239 68 68 / 18%), 0 3px 9px rgb(63 16 16 / 32%);
+/* Keep the passage currently being edited recognizable even when the caret
+   moves between Slate leaves. This calm pulse is deliberately slower and
+   softer than the rotating re-evaluation indicator. */
+.local-edit-marker--editing {
+  animation: local-edit-marker-editing 1.8s ease-in-out infinite;
 }
 
 .editor-scroll-shell--checking .local-edit-marker {
@@ -611,8 +614,18 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes local-edit-marker-editing {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgb(239 68 68 / 14%), 0 3px 9px rgb(63 16 16 / 28%);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgb(239 68 68 / 24%), 0 3px 11px rgb(63 16 16 / 34%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .local-edit-marker { transition-duration: 0ms; }
+  .local-edit-marker--editing { animation: none; }
   .local-edit-marker--more::before { animation: none; }
   .editor-scroll-shell--checking .local-edit-marker::before { animation: none; }
 }
@@ -863,6 +876,15 @@
   border-color: rgb(22 163 74 / var(--marker-opacity));
   background: rgb(74 222 128 / var(--marker-opacity));
   color: rgb(22 163 74 / var(--marker-opacity));
+}
+
+/* A successfully re-evaluated finding no longer communicates urgency.
+ * Keep its spatial marker visible, but remove the severity-driven ripple so
+ * the resolved state is distinguishable without relying on red/green alone. */
+.offscreen-inconsistency-marker--success::before,
+.offscreen-inconsistency-marker--success::after {
+  display: none;
+  animation: none;
 }
 
 .offscreen-inconsistency-marker:hover,
