@@ -349,7 +349,6 @@ declare module "slate" {
       conflictInconsistencyIds?: string[];
       previewInconsistencyIds?: string[];
       sentenceInconsistencyIds?: string[];
-      suggestionPreview?: boolean;
       freeEditInsertion?: boolean;
       replayVersion?: number;
     };
@@ -5428,12 +5427,23 @@ function deserialize(
     restoreScrollPosition();
   }
 
-  const activeInconsistencyImpact = activeInconsistencyId
+  const activeFactInconsistency = activeInconsistencyId
     ? inconsistencies.find(
         (inconsistency) =>
           getStableInconsistencyId(inconsistency) === activeInconsistencyId
-      )?.impact ?? null
-    : null;
+      )
+    : undefined;
+  const activeCharacterInconsistency = activeInconsistencyId
+    ? characterInconsistencies.find(
+        (inconsistency) =>
+          getStableCharacterInconsistencyId(inconsistency) === activeInconsistencyId
+      )
+    : undefined;
+  const activeInconsistencySeverity: InconsistencySeverity | null =
+    activeFactInconsistency?.severity ??
+    (activeCharacterInconsistency
+      ? characterSeverity(activeCharacterInconsistency.confidence)
+      : null);
 
   const visibleConfirmedChangeIds = new Set([
     ...trackedChanges.flatMap((change) =>
@@ -6040,7 +6050,7 @@ function deserialize(
             renderLeaf={(props) => renderLeaf({
               ...props,
               activeInconsistencyId,
-              activeInconsistencyImpact,
+              activeInconsistencySeverity,
               jitterSuppressedIds,
               hiddenInconsistencyIds: effectiveHiddenInconsistencyIds,
               transitionHiddenInconsistencyIds,
@@ -6056,7 +6066,7 @@ function deserialize(
             spellCheck
             />
           </div>
-          {localEditMarker?.markers.map((marker, markerIndex) => (
+          {activeInconsistencyId && localEditMarker?.markers.map((marker, markerIndex) => (
             <span
               key={marker.key}
               className={`local-edit-marker local-edit-marker--${localEditMarker.change}${isPassageEditActive && !incrementalRecheckActive && localEditMarker.change !== "resolved" ? " local-edit-marker--editing" : ""}${localEditMarker.visible ? "" : " local-edit-marker--dismissing"}`}
@@ -6104,7 +6114,7 @@ function deserialize(
               {factPreviewConnections.map((connection) => (
                 <path
                   key={connection.key}
-                  className={`fact-preview-connection${activeInconsistencyId === successfulInconsistencyId ? " fact-preview-connection--success" : ""}`}
+                  className={`fact-preview-connection${successfulInconsistencyId !== null && activeInconsistencyId === successfulInconsistencyId ? " fact-preview-connection--success" : ""}`}
                   d={connection.path}
                   pathLength="1"
                 />
@@ -6135,7 +6145,7 @@ function deserialize(
                   <button
                     type="button"
                     key={preview.key}
-                    className={`offscreen-fact-preview${activeInconsistencyId === successfulInconsistencyId ? " offscreen-fact-preview--success" : ""}`}
+                    className={`offscreen-fact-preview${successfulInconsistencyId !== null && activeInconsistencyId === successfulInconsistencyId ? " offscreen-fact-preview--success" : ""}`}
                     data-fact-preview-key={preview.key}
                     onClick={() => navigateToFactPreview(preview)}
                     aria-label={`Scroll to passage: ${preview.fact}`}
@@ -7104,7 +7114,7 @@ function renderLeaf({
   children,
   leaf,
   activeInconsistencyId,
-  activeInconsistencyImpact,
+  activeInconsistencySeverity,
   jitterSuppressedIds,
   hiddenInconsistencyIds,
   transitionHiddenInconsistencyIds,
@@ -7187,14 +7197,7 @@ function renderLeaf({
   return (
     <span
       style={
-        leaf.suggestionPreview
-          ? {
-              animationName:
-                (leaf.replayVersion ?? 0) % 2 === 0
-                  ? "sentence-suggestion-preview-a"
-                  : "sentence-suggestion-preview-b",
-            }
-          : leaf.inconsistencyRole === "conflict" &&
+        leaf.inconsistencyRole === "conflict" &&
         activeInconsistencyId !== null &&
         leaf.replayVersion &&
         !belongsToActiveScope &&
@@ -7215,7 +7218,6 @@ function renderLeaf({
       {...attributes}
       data-change-id={leaf.changeId || undefined}
       data-change-type={leaf.changeType || undefined}
-      data-suggestion-preview={leaf.suggestionPreview || undefined}
       data-free-edit-insertion={leaf.freeEditInsertion || undefined}
       data-inconsistency-role={leaf.inconsistencyRole}
       data-preview-inconsistency-ids={
@@ -7235,9 +7237,7 @@ function renderLeaf({
           : undefined
       }
       className={[
-        leaf.suggestionPreview
-          ? "sentence-suggestion-preview"
-          : suppressOuterInconsistencyDecoration
+        suppressOuterInconsistencyDecoration
           ? undefined
           : isHidden
           ? undefined
@@ -7257,8 +7257,8 @@ function renderLeaf({
                 leaf.inconsistencySeverity ?? "medium"
               }`,
               belongsToActiveScope ? "inconsistency-scope-active" : "",
-              belongsToActiveScope
-                ? `inconsistency-scope-active--${activeInconsistencyImpact}`
+              belongsToActiveScope && activeInconsistencySeverity
+                ? `inconsistency-scope-active--severity-${activeInconsistencySeverity}`
                 : "",
               belongsToActiveScope ? "inconsistency-scope-active--conflict" : "",
               suppressJitter ? "inconsistent-text--no-jitter" : "",
@@ -7272,8 +7272,8 @@ function renderLeaf({
                   ? "inconsistency-context--active"
                   : "",
                 belongsToActiveScope ? "inconsistency-scope-active" : "",
-                belongsToActiveScope
-                  ? `inconsistency-scope-active--${activeInconsistencyImpact}`
+                belongsToActiveScope && activeInconsistencySeverity
+                  ? `inconsistency-scope-active--severity-${activeInconsistencySeverity}`
                   : "",
                 belongsToActiveScope ? "inconsistency-scope-active--context" : "",
                 transitionClass,
