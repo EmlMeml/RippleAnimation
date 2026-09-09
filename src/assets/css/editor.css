@@ -257,42 +257,6 @@
   transition: background-color 200ms ease;
 }
 
-.editor .sentence-suggestion-preview {
-  position: relative;
-  z-index: 2;
-  display: inline;
-  border-radius: 4px;
-  background: #fef3c7;
-  color: #252b45;
-  opacity: 1;
-  transform-origin: center;
-  animation-duration: 620ms;
-  animation-timing-function: ease-in-out;
-  animation-fill-mode: both;
-}
-
-@keyframes sentence-suggestion-preview-a {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgb(245 158 11 / 0%);
-  }
-  45% {
-    transform: scale(1.045);
-    box-shadow: 0 0 0 4px rgb(245 158 11 / 24%);
-  }
-}
-
-@keyframes sentence-suggestion-preview-b {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgb(245 158 11 / 0%);
-  }
-  45% {
-    transform: scale(1.045);
-    box-shadow: 0 0 0 4px rgb(245 158 11 / 24%);
-  }
-}
-
 .editor.editor--scope-active .inconsistency-sentence--active[data-slate-leaf] {
   background-color: #fff7ed;
   opacity: 1;
@@ -324,44 +288,47 @@
   --scope-delay: 140ms;
 }
 
-.editor .inconsistency-scope-active--local {
-  animation-name: inconsistency-scope-local;
-  animation-duration: 520ms;
+.editor .inconsistency-scope-active--severity-low {
+  --scope-scale: 1.018;
+  --scope-ring-size: 4px;
+  --scope-ring-opacity: 20%;
+  animation: inconsistency-scope-severity 720ms ease-in-out both;
+  animation-delay: var(--scope-delay);
 }
 
-.editor .inconsistency-scope-active--character {
-  animation-name: inconsistency-scope-character;
-  animation-duration: 620ms;
+.editor .inconsistency-scope-active--severity-medium {
+  --scope-scale: 1.032;
+  --scope-ring-size: 6px;
+  --scope-ring-opacity: 24%;
+  animation: inconsistency-scope-severity 640ms ease-in-out both;
+  animation-delay: var(--scope-delay);
 }
 
-.editor .inconsistency-scope-active--relationship {
-  animation-name: inconsistency-scope-relationship;
-  animation-duration: 620ms;
+.editor .inconsistency-scope-active--severity-high {
+  --scope-scale: 1.048;
+  --scope-ring-size: 8px;
+  --scope-ring-opacity: 28%;
+  animation: inconsistency-scope-severity 560ms ease-in-out both;
+  animation-delay: var(--scope-delay);
 }
 
-.editor .inconsistency-scope-active--world {
-  animation-name: inconsistency-scope-world;
-  animation-duration: 800ms;
+.editor .inconsistency-scope-active--severity-critical {
+  --scope-scale: 1.065;
+  --scope-ring-size: 10px;
+  --scope-ring-opacity: 32%;
+  animation: inconsistency-scope-severity 480ms ease-in-out both;
+  animation-delay: var(--scope-delay);
 }
 
-@keyframes inconsistency-scope-local {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
-}
-
-@keyframes inconsistency-scope-character {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 3px rgb(248 113 113 / 18%); }
-  45% { transform: scale(1.045); box-shadow: 0 0 0 7px rgb(248 113 113 / 28%); }
-}
-
-@keyframes inconsistency-scope-relationship {
-  0%, 100% { transform: scaleX(1); }
-  50% { transform: scaleX(1.06); }
-}
-
-@keyframes inconsistency-scope-world {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 3px rgb(248 113 113 / 18%); }
-  50% { transform: scale(1.025); box-shadow: 0 0 0 10px rgb(248 113 113 / 22%); }
+@keyframes inconsistency-scope-severity {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 3px rgb(248 113 113 / 18%);
+  }
+  45% {
+    transform: scale(var(--scope-scale));
+    box-shadow: 0 0 0 var(--scope-ring-size) rgb(248 113 113 / var(--scope-ring-opacity));
+  }
 }
 
 @keyframes inconsistency-jitter {
@@ -2180,8 +2147,7 @@
   .tracked-change-finalizing .confirmed-correct-passage,
   .tracked-change-finalizing .tracked-insertion::after,
   .tracked-change-finalizing .confirmed-correct-passage::after,
-  .inconsistency-hover-locate,
-  .sentence-suggestion-preview {
+  .inconsistency-hover-locate {
     animation: none;
   }
 
