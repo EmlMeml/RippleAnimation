@@ -16,8 +16,6 @@ type StudyPhase = "consent" | "running" | "confirming" | "completed";
 function App() {
   const [phase, setPhase] = useState<StudyPhase>("consent");
   const [participantCode, setParticipantCode] = useState("");
-  const [participationConsent, setParticipationConsent] = useState(false);
-  const [dataConsent, setDataConsent] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
   const [completionError, setCompletionError] = useState("");
 
@@ -33,7 +31,7 @@ function App() {
   function startStudy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedCode = participantCode.trim();
-    if (!normalizedCode || !participationConsent || !dataConsent) return;
+    if (!normalizedCode) return;
     beginStudySession(normalizedCode);
     setPhase("running");
   }
@@ -58,19 +56,15 @@ function App() {
         <form className="study-gate-card" onSubmit={startStudy}>
           <InformedConsent
             participantCode={participantCode}
-            participationConsent={participationConsent}
-            dataConsent={dataConsent}
             onParticipantCodeChange={setParticipantCode}
-            onParticipationConsentChange={setParticipationConsent}
-            onDataConsentChange={setDataConsent}
           />
 
           <button
             className="study-primary-button"
             type="submit"
-            disabled={!participantCode.trim() || !participationConsent || !dataConsent}
+            disabled={!participantCode.trim()}
           >
-            Start study
+            Start Study
           </button>
         </form>
       </main>
