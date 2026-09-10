@@ -6821,7 +6821,8 @@ function OffscreenMarker({
   const passageStatus = marker.resolutionReady
     ? "ready to resolve"
     : `${marker.occurrenceCount} ${countStatus} ${marker.occurrenceCount === 1 ? "passage" : "passages"}`;
-  const label = `${marker.label}: ${marker.detail}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
+  const severityLabel = `Severity: ${marker.severity.toUpperCase()}`;
+  const label = `${marker.label}: ${marker.detail}, ${severityLabel}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
 
   return (
     <button
@@ -6839,6 +6840,7 @@ function OffscreenMarker({
       <span className="offscreen-inconsistency-marker-icon" aria-hidden="true">{marker.emoji}</span>
       <span className="offscreen-inconsistency-tooltip" aria-hidden="true">
         <strong>{marker.label}</strong>
+        <span>{severityLabel}</span>
         <span>{marker.detail} · {passageStatus}</span>
       </span>
     </button>
