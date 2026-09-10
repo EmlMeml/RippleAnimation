@@ -1723,7 +1723,6 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     if (
       !scrollContainer ||
       !shell ||
-      incrementalRecheckActive ||
       !activeInconsistencyId ||
       offscreenFactPreviews.length === 0
     ) {
@@ -1754,7 +1753,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       const isRelatedChange = Boolean(
         element.dataset.changeId &&
         relatedChangeIds.has(element.dataset.changeId) &&
-        element.dataset.changeType !== "deletion"
+        (element.dataset.changeType !== "deletion" || incrementalRecheckActive)
       );
       return isDecoratedPassage || isRelatedChange;
     });
@@ -1768,10 +1767,18 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       return;
     }
 
-    const sourceRect = conflictElement.getBoundingClientRect();
+    // Anchor beside the rendered text line, not in the middle of its highlight.
+    // Individual client rects also keep wrapped passages attached to a real line.
+    const sourceRect = Array.from(conflictElement.getClientRects()).find(
+      (rect) => rect.height > 0 && rect.bottom >= viewport.top && rect.top <= viewport.bottom
+    ) ?? conflictElement.getBoundingClientRect();
+    const paragraph = conflictElement.closest<HTMLElement>("p, h1, h2, h3, li, blockquote");
+    const lineStart = paragraph
+      ? paragraph.getBoundingClientRect().left
+      : sourceRect.left;
     const sourceX = Math.min(
       shellRect.width - 12,
-      Math.max(12, sourceRect.left + sourceRect.width / 2 - shellRect.left)
+      Math.max(12, lineStart - shellRect.left)
     );
     const sourceY = Math.min(
       shellRect.height - 8,
@@ -1791,10 +1798,8 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       }
 
       const previewRect = previewElement.getBoundingClientRect();
-      const targetX = previewRect.left + previewRect.width / 2 - shellRect.left;
-      const targetY = preview.direction === "above"
-        ? previewRect.bottom - shellRect.top
-        : previewRect.top - shellRect.top;
+      const targetX = previewRect.left - shellRect.left;
+      const targetY = previewRect.top + previewRect.height / 2 - shellRect.top;
       const railX = 12;
       const sourceControlX = Math.max(railX, sourceX - 26);
       const targetControlX = Math.max(railX, targetX - 26);
@@ -6104,7 +6109,7 @@ function deserialize(
               <span className="analysis-loading-scan" aria-hidden="true" />
             </div>
           )}
-          {!incrementalRecheckActive && factPreviewConnections.length > 0 && (
+          {factPreviewConnections.length > 0 && (
             <svg
               className="fact-preview-connection-overlay"
               width="100%"
@@ -6816,7 +6821,8 @@ function OffscreenMarker({
   const passageStatus = marker.resolutionReady
     ? "ready to resolve"
     : `${marker.occurrenceCount} ${countStatus} ${marker.occurrenceCount === 1 ? "passage" : "passages"}`;
-  const label = `${marker.label}: ${marker.detail}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
+  const severityLabel = `Severity: ${marker.severity.toUpperCase()}`;
+  const label = `${marker.label}: ${marker.detail}, ${severityLabel}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
 
   return (
     <button
@@ -6834,6 +6840,7 @@ function OffscreenMarker({
       <span className="offscreen-inconsistency-marker-icon" aria-hidden="true">{marker.emoji}</span>
       <span className="offscreen-inconsistency-tooltip" aria-hidden="true">
         <strong>{marker.label}</strong>
+        <span>{severityLabel}</span>
         <span>{marker.detail} · {passageStatus}</span>
       </span>
     </button>
