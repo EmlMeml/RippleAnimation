@@ -13,18 +13,27 @@ This document defines the events and derived metrics used for the study data ana
 | `inconsistency_selected` | An inconsistency became the explicit focus. | `inconsistency_id`, `source` |
 | `editor_marker_clicked` | A highlighted marker in the editor was clicked. | `inconsistency_id`, `role` |
 | `editor_marker_hovered` | An editor marker was hovered for at least 300 ms. | `inconsistency_id`, `duration_ms` |
+| `location_marker_created` | An offscreen location marker was created at the upper or lower editor boundary. | `inconsistency_id`, `direction`, `severity`, `category`, `detail`, `passage_count`, `successful`, `resolution_ready`, `opacity`, `edge_offset_px`, `marker_size_px`, `selected` |
+| `location_marker_clicked` | An offscreen location marker was used for navigation. | Same marker-state fields as `location_marker_created` |
+| `location_marker_hovered` | A location marker was hovered for at least 300 ms. | `inconsistency_id`, `direction`, `severity`, `passage_count`, `successful`, `duration_ms` |
 | `navigation_marker_clicked` | A marker in the left navigation was clicked. | `inconsistency_id`, `page`, `severity` |
 | `navigation_marker_hovered` | A left-navigation marker was hovered for at least 300 ms. | `inconsistency_id`, `page`, `duration_ms` |
 | `context_preview_clicked` | An off-screen context preview above or below the editor viewport was clicked. | `inconsistency_id`, `direction`, `target_index`, `preview_key` |
-| `card_interaction` | A relevant control inside a right-side inconsistency card was used. | `inconsistency_id`, `action` |
+| `card_interaction` | A specific control inside a right-side inconsistency card was used. | `inconsistency_id`, `inconsistency_type`, `action`, `control_label`, `change_id` |
+| `inconsistency_panel_interaction` | A global or category-level panel control was used. | `action`, `category`, `control_label` |
 | `inconsistency_work_started` | A timed work segment for one inconsistency began. | `inconsistency_id`, `work_session_id`, `source` |
 | `inconsistency_work_finished` | A timed work segment ended. | `inconsistency_id`, `work_session_id`, `outcome`, `duration_ms`, `interaction_count` |
-| `suggestion_accepted` | A direct replacement was applied with **Add change**. | `inconsistency_id`, `source`, `occurrence_count`, `replacement_character_count` |
-| `suggestion_rejected` | A tracked change was removed or rejected. | `inconsistency_id`, `source`, `occurrence_count` |
-| `manual_edit_finished` | A free edit was submitted for review. It does not end work timing. | `inconsistency_id`, `paragraph_count` |
+| `change_accepted` | A direct or tracked change was applied or accepted. | `inconsistency_id`, `source`, `change_type`, `removed_texts`, `added_text` or `added_texts`, `occurrence_count` |
+| `change_rejected` | A change or author decision was removed or reverted. | `inconsistency_id`, `source`, `change_type`, `removed_texts`, `added_texts`, `occurrence_count` |
+| `passage_confirmed` | A passage was explicitly marked as **Looks good**. | `inconsistency_id`, `inconsistency_type`, `source`, `confirmation_id`, `confirmed_text`, passage/evidence location |
+| `manual_edit_finished` | A free edit was submitted for review. It does not end work timing. | `inconsistency_id`, `paragraph_count`, `change_types`, `removed_texts`, `added_texts` |
+| `page_changed` | Page navigation was requested through the page controls or document overview. | `source`, `from_page`, `to_page`, `direction`, `page_count`, `zoom_percent` |
+| `zoom_changed` | The editor zoom was increased, decreased, or reset. | `source`, `previous_zoom_percent`, `new_zoom_percent` |
 | `undo` | The participant invoked Ctrl/Cmd+Z. | `inconsistency_id`, `source` |
 | `study_completed` | The run ended explicitly or because the page was closed. | `outcome` (`completed` or `page_closed`) |
 | `error` | A technical error occurred. | `operation`, `message` |
+
+The legacy event `text_edited` may occur in data recorded with an older frontend. The current frontend no longer logs individual Slate text operations; it records consolidated text differences when a tracked change is submitted instead.
 
 ## Derived metrics
 

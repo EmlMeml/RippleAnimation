@@ -4,6 +4,7 @@ import { askAI } from "./../ai/api";
 import { normalizeTemporal } from "./temporalNormalizer";
 import { resolvePronouns } from "./pronounResolver";
 import { addMissingExplicitAgeFacts } from "./explicitAgeFacts";
+import { addMissingExplicitBirthplaceFacts } from "./explicitBirthplaceFacts";
 
 const MAX_CHUNK_WORDS = 1500;
 const MAX_CHUNK_RETRIES = 2;
@@ -645,9 +646,9 @@ export async function extractFacts(
     ));
   }
 
-  const extraction = resolvePronouns(
+  const extraction = addMissingExplicitBirthplaceFacts(text, resolvePronouns(
     mergeExtractions(chunkExtractions)
-  );
+  ));
   extraction.facts = addMissingExplicitAgeFacts(text, extraction.entities, extraction.facts);
   console.log("nach askAI | vor orderFacts");
   const orderedFacts = [...extraction.facts].sort(

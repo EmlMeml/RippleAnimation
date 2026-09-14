@@ -3,6 +3,7 @@ import { extractFacts } from "./extractesFacts";
 import { askAI } from "./../ai/api";
 import type { FactExtraction } from "../types/facts";
 import { checkConsistency } from "../ai/consistencyChecker";
+import { EXAMPLE_TEXT } from "../custom/editor/exampleText";
 
 vi.mock("./../ai/api", () => ({
   askAI: vi.fn(),
@@ -12,6 +13,19 @@ describe("extractFacts", () => {
   const context = {
     referenceDate: "2026-08-14",
   };
+
+  it("keeps the birthplace conflict after editing example 1 even when the AI returns only ages", async () => {
+    vi.mocked(askAI).mockResolvedValue({
+      entities: [{ id: "alice", name: "Alice", type: "person" }],
+      facts: [
+        { subject: "alice", predicate: "age", value: 33, source: { paragraphIndex: 1 } },
+        { subject: "alice", predicate: "age", value: 39, source: { paragraphIndex: 6 } },
+      ],
+    });
+    const result = await extractFacts(EXAMPLE_TEXT.replace("thirty-two", "Thirthy-three"), context);
+    expect(checkConsistency(result).map((issue) => issue.predicate)).toEqual(expect.arrayContaining(["age", "born_in"]));
+    vi.mocked(askAI).mockClear();
+  });
 
   it("wiederholt nur einen fehlgeschlagenen Chunk", async () => {
     const extraction: FactExtraction = {

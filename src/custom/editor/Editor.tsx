@@ -28,7 +28,12 @@ import { extractFacts } from "./../../analysis/extractesFacts";
 import type { Fact, FactExtraction, Predicate } from "./../../types/facts";
 import { factValueAppearsInText, getFactValuePattern } from "./factTextMatching";
 import { getEditorText } from "./getEditorText";
+import { createPassageAnchors, getPassageNavigationRange } from "./passageAnchors";
+import { prepareFullAnalysis } from "./prepareFullAnalysis";
+import { captureDirectPassageEdit } from "./directPassageEdit";
 import { reconcileReevaluation } from "./reconcileReevaluation";
+import { reconcileConsistencyCategories } from "../../ai/reconcileConsistencyCategories";
+import { recheckStoryPassages } from "../../ai/recheckStoryPassages";
 import {
   checkConsistency,
   type Inconsistency,
@@ -92,6 +97,15 @@ type TrackedChange = {
 
 type SuggestionMode = "replace" | "free";
 
+type DirectEditRecord = {
+  id: string;
+  issueId: string;
+  before: string;
+  after: string;
+  rangeRef: RangeRef | null;
+  status: "checking" | "resolved" | "inconsistent" | "error";
+};
+
 type LocalEditMarkerState = {
   markers: Array<{ key: string; x: number; y: number; active: boolean }>;
   occurrenceCount: number;
@@ -146,6 +160,7 @@ type InconsistentTextRange = BaseRange & {
 
 type OffscreenInconsistency = {
   index: number;
+  inconsistencyId: string;
   severity: InconsistencySeverity;
   emoji: string;
   label: string;
@@ -177,6 +192,10 @@ type AffectedFactPosition = {
   fact: Fact;
   range: BaseRange;
   previewText?: string;
+  textChanged?: boolean;
+  textDeleted?: boolean;
+  anchorKey?: string;
+  navigationRange?: BaseRange | null;
 };
 
 type DependentPassage = {
@@ -351,6 +370,7 @@ declare module "slate" {
       sentenceInconsistencyIds?: string[];
       freeEditInsertion?: boolean;
       replayVersion?: number;
+      directEditStatus?: "pending" | "resolved" | "inconsistent";
     };
   }
 }
@@ -383,7 +403,7 @@ function normalizeFactMatchText(value: unknown): string {
 
 
 export default function RichTextEditor({context,}: {context: StoryContext}) {
-  const editor = useMemo(() => {
+  const { editor, passageAnchors } = useMemo(() => {
     const e = withHistory(
     withReact(createEditor())
   );
@@ -397,7 +417,15 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       : isInline(element);
   };
 
-  return e;
+  const anchors = createPassageAnchors<{
+    issueId: string; position?: AffectedFactPosition; evidenceIndex?: number; managed?: boolean;
+  }>(e);
+  const apply = e.apply;
+  e.apply = (operation) => {
+    anchors.transform(operation);
+    apply(operation);
+  };
+  return { editor: e, passageAnchors: anchors };
   }, []);
 
   const [inconsistencies, setInconsistencies] = useState<Inconsistency[]>([]);
@@ -673,11 +701,16 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     useState<OffscreenInconsistency[]>([]);
   const [offscreenBelow, setOffscreenBelow] =
     useState<OffscreenInconsistency[]>([]);
+  const locationMarkerLoggedSizesRef = useRef<Map<string, number>>(new Map());
   const [offscreenFactPreviews, setOffscreenFactPreviews] =
     useState<OffscreenFactPreview[]>([]);
   const [factPreviewConnections, setFactPreviewConnections] =
     useState<FactPreviewConnection[]>([]);
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
+  const [directEditRecords, setDirectEditRecords] = useState<DirectEditRecord[]>([]);
+  const [passageRecheckErrors, setPassageRecheckErrors] = useState<Map<string, string>>(new Map());
+  const [passageResolvedIds, setPassageResolvedIds] = useState<Set<string>>(new Set());
+  const passageRecheckInFlightRef = useRef(false);
   const [reopenedFactChangeIds, setReopenedFactChangeIds] =
     useState<Set<string>>(() => new Set());
   const [finalizingChangeIds, setFinalizingChangeIds] =
@@ -795,16 +828,37 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     ))));
   }, [documentZoom]);
 
-  const navigateToPage = useCallback((page: number) => {
+  const navigateToPage = useCallback((page: number, source = "document_overview") => {
     const container = editorScrollRef.current;
     if (!container) return;
     const target = Math.min(pageCount - 1, Math.max(0, page));
+    if (target !== currentPage) {
+      logStudyEvent("page_changed", {
+        source,
+        from_page: currentPage + 1,
+        to_page: target + 1,
+        direction: target > currentPage ? "next" : "previous",
+        page_count: pageCount,
+        zoom_percent: documentZoom,
+      });
+    }
     container.scrollTo({
       top: target * container.clientHeight * (documentZoom / 100),
       behavior: "smooth",
     });
     setCurrentPage(target);
-  }, [documentZoom, pageCount]);
+  }, [currentPage, documentZoom, pageCount]);
+
+  const changeDocumentZoom = useCallback((nextZoom: number, source: string) => {
+    const normalizedZoom = Math.min(180, Math.max(60, nextZoom));
+    if (normalizedZoom === documentZoom) return;
+    logStudyEvent("zoom_changed", {
+      source,
+      previous_zoom_percent: documentZoom,
+      new_zoom_percent: normalizedZoom,
+    });
+    setDocumentZoom(normalizedZoom);
+  }, [documentZoom]);
 
   const layoutParagraphsAcrossPages = useCallback(() => {
     const container = editorScrollRef.current;
@@ -829,6 +883,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     // eingefroren. Sonst kann bereits ein einziges Zeichen den Absatz über eine
     // Seitengrenze schieben und unmittelbar ein großes padding-top erzeugen.
     if (!isLayoutFrozen) {
+      const previousScrollTop = container.scrollTop;
+      const viewport = container.getBoundingClientRect();
+      const scrollAnchor = blocks.find((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+      const oldAnchorTop = scrollAnchor ? scrollAnchor.offsetTop + (Number.parseFloat(scrollAnchor.style.paddingTop) || 0) : 0;
       // Erst den natürlichen Textfluss wiederherstellen, damit die Messung nicht
       // auf Abständen einer früheren Fenster- oder Textgröße basiert.
       blocks.forEach((block) => block.style.removeProperty("padding-top"));
@@ -847,6 +908,10 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           block.style.paddingTop = `${pageEnd - top + pageVerticalPadding}px`;
         }
       }
+      // Clearing page padding can temporarily shrink the document and clamp
+      // scrollTop. Keep the same paragraph in view after the final layout.
+      const newAnchorTop = scrollAnchor ? scrollAnchor.offsetTop + (Number.parseFloat(scrollAnchor.style.paddingTop) || 0) : 0;
+      container.scrollTop = previousScrollTop + (newAnchorTop - oldAnchorTop) * zoomFactor;
     }
 
     const measuredBlockPages = blocks.map((block) => {
@@ -1013,6 +1078,72 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [document, layoutParagraphsAcrossPages]);
 
+  function directEditViews(issueId?: string) {
+    const activeIds = new Set([...inconsistencies.map(getStableInconsistencyId), ...characterInconsistencies.map(getStableCharacterInconsistencyId)]);
+    const recorded = directEditRecords.filter((record) => activeIds.has(record.issueId) && (!issueId || record.issueId === issueId)).map((record) => ({
+      ...record, range: record.rangeRef?.current ?? null,
+      status: record.status as DirectEditRecord["status"] | "pending",
+    }));
+    const pending = [...passageAnchors.entries].flatMap(([key, entry]) => {
+      if (entry.data.managed || !activeIds.has(entry.data.issueId) || (issueId && entry.data.issueId !== issueId)) return [];
+      const change = captureDirectPassageEdit(editor, entry);
+      if (!change || recorded.some((record) => record.issueId === entry.data.issueId && record.before === change.before && record.after === change.after)) return [];
+      return [{ ...change, id: `pending-${key}`, issueId: entry.data.issueId, status: "pending" as const }];
+    });
+    return [...recorded, ...pending].filter((change, index, all) => !all.slice(0, index).some((earlier) =>
+      earlier.issueId === change.issueId && earlier.before === change.before && earlier.after === change.after &&
+      JSON.stringify(earlier.range) === JSON.stringify(change.range)
+    ));
+  }
+
+  function renderDirectEditHistory(issueId: string) {
+    return directEditViews(issueId).map((change) => {
+      const hunks = getTextDiffHunks(change.before, change.after);
+      const parts: React.ReactNode[] = [];
+      let cursor = 0;
+      hunks.forEach((hunk, index) => {
+        parts.push(<React.Fragment key={index}>
+          {change.before.slice(cursor, hunk.beforeStart)}
+          {hunk.beforeEnd > hunk.beforeStart && <del>{change.before.slice(hunk.beforeStart, hunk.beforeEnd)}</del>}
+          {hunk.afterEnd > hunk.afterStart && <ins>{change.after.slice(hunk.afterStart, hunk.afterEnd)}</ins>}
+        </React.Fragment>);
+        cursor = hunk.beforeEnd;
+      });
+      parts.push(change.before.slice(cursor));
+      const stale = change.range && Editor.string(editor, change.range) !== change.after;
+      return <aside key={change.id} data-study-change-id={change.id} className={`tracked-change-dialog tracked-change-dialog--inline ${change.status === "resolved" ? "tracked-change-card--accepted" : change.status === "inconsistent" ? "tracked-change-card--invalid" : "tracked-change-card--pending"}`}>
+        <strong className="tracked-change-dialog-title">Tracked Change · Direct edit</strong>
+        <p>{stale ? "This passage was edited again after this change." : ({ pending: "Not checked yet.", checking: "Reanalyzing…", resolved: "Reanalyze: no remaining inconsistency.", inconsistent: "Reanalyze: the inconsistency remains.", error: "Recheck failed. The change is still recorded." })[change.status]}</p>
+        <div className="tracked-change-contexts"><div className="tracked-change-context">{parts}</div></div>
+        {change.range && !Range.isCollapsed(change.range) && <div className="tracked-change-actions"><button type="button" onClick={() => {
+          try { ReactEditor.toDOMRange(editor, change.range!).startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* The document may have changed since rendering. */ }
+        }}>Show in text</button></div>}
+      </aside>;
+    });
+  }
+
+  // Decorations keep edits visible without injecting historical deleted words
+  // into the actual document or into subsequent AI requests.
+  const directEditDecorations: DecoratedRange[] = directEditViews().flatMap((change) => {
+    if (!change.range || Editor.string(editor, change.range) !== change.after) return [];
+    const hunks = getTextDiffHunks(change.before, change.after);
+    let offset = 0;
+    return getRangeTextFragments(change.range).flatMap((fragment) => {
+      const [start, end] = Range.edges(fragment);
+      const fragmentStart = offset;
+      offset += end.offset - start.offset;
+      return hunks.flatMap((hunk) => {
+        const from = Math.max(fragmentStart, hunk.afterStart);
+        const to = Math.min(offset, hunk.afterEnd);
+        return to > from ? [{
+          anchor: { path: start.path, offset: start.offset + from - fragmentStart },
+          focus: { path: start.path, offset: start.offset + to - fragmentStart },
+          directEditStatus: change.status === "resolved" ? "resolved" as const : change.status === "inconsistent" ? "inconsistent" as const : "pending" as const,
+        }] : [];
+      });
+    });
+  });
+
   const decorateInconsistencies = useCallback(
     ([node, path]: NodeEntry): DecoratedRange[] => {
       if (!Text.isText(node)) {
@@ -1104,9 +1235,9 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         });
       }
 
-      return segments;
+      return [...segments, ...directEditDecorations.filter((range) => Path.equals(range.anchor.path, path))];
     },
-    [inconsistentRanges]
+    [inconsistentRanges, directEditDecorations]
   );
 
   function scrollToInconsistencyCard(inconsistencyId: string) {
@@ -1367,7 +1498,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         const resolutionReady = successfulInconsistencyId === inconsistencyId;
         return {
           index,
-          id: getStableInconsistencyId(inconsistency),
+          inconsistencyId,
           severity: inconsistency.severity ?? "medium" as InconsistencySeverity,
           emoji: theme.emoji,
           label: theme.label,
@@ -1395,7 +1526,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         ).length;
         return {
           index: inconsistencies.length + index,
-          id: inconsistencyId,
+          inconsistencyId,
           severity: characterSeverity(inconsistency.confidence),
           emoji: CHARACTER_CATEGORY_EMOJI[inconsistency.category],
           label: "Character Continuity",
@@ -1417,7 +1548,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         marker.index === hoveredNavigationInconsistencyIndex
       )
       .flatMap((marker) => {
-      const { id } = marker;
+      const { inconsistencyId: id } = marker;
       if (effectiveHiddenInconsistencyIds.has(id)) {
         return [];
       }
@@ -1492,8 +1623,9 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       const markers = positions
         .filter((position) => position.direction === direction)
         .sort((a, b) => a.edgeOffset - b.edgeOffset)
-        .map(({ index, severity, emoji, label, detail, occurrenceCount, successful, resolutionReady, edgeOffset, distance }) => ({
+        .map(({ index, inconsistencyId, severity, emoji, label, detail, occurrenceCount, successful, resolutionReady, edgeOffset, distance }) => ({
           index,
+          inconsistencyId,
           severity,
           emoji,
           label,
@@ -1853,6 +1985,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
   
   function replaceEditorContent(nodes: Descendant[]) {
+    passageAnchors.clear();
     Editor.withoutNormalizing(editor, () => {
       editor.children = nodes;
 
@@ -1861,6 +1994,17 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         focus: { path: [0, 0], offset: 0 },
       };
     });
+    resetAnalysisWorkflow();
+    setDocument(nodes);
+    editor.onChange();
+  }
+
+  function resetAnalysisWorkflow() {
+    directEditRecords.forEach((record) => record.rangeRef?.unref());
+    setDirectEditRecords([]);
+    setPassageRecheckErrors(new Map());
+    setPassageResolvedIds(new Set());
+    passageAnchors.clear();
     // A newly loaded document starts a genuinely new analysis run. Stable
     // inconsistency IDs are intentionally reused for the study examples, so
     // passage decisions from the previous run must not leak into the new one.
@@ -1870,6 +2014,20 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     freeEditRangeRefs.current = [];
     freeEditChangedRangeRefs.current.forEach((rangeRef) => rangeRef.unref());
     freeEditChangedRangeRefs.current = [];
+    trackedChanges.forEach((change) => change.affectedRangeRefs.forEach((rangeRef) => rangeRef.unref()));
+    dependentPassages.forEach((passage) => passage.rangeRef.unref());
+    freeEditInconsistencyIdRef.current = null;
+    freeEditDocumentSnapshotRef.current = [];
+    freeEditDocumentNodesSnapshotRef.current = [];
+    setFreeEditInconsistency(null);
+    setFreeEditCharacterInconsistency(null);
+    setFreeEditParagraphs([]);
+    setFreeEditCharacterEvidenceIndices([]);
+    setSuggestionTarget(null);
+    setSuggestionDraft("");
+    setSelectedSuggestionFacts(new Set());
+    setFinalizingChangeIds(new Set());
+    setFinalizingInsertionOnlyChangeIds(new Set());
     setCharacterDecisions([]);
     setHandledCharacterEvidenceKeys(new Set());
     setConfirmedPositionKeys(new Set());
@@ -1889,8 +2047,6 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     setOffscreenBelow([]);
     setOffscreenFactPreviews([]);
     setFactPreviewConnections([]);
-    setDocument(nodes);
-    editor.onChange();
   }  
 /* 
   function getFactSearchText(fact: Fact): string {
@@ -2148,6 +2304,23 @@ function getInconsistentTextRanges(
 
   for (const inconsistency of inconsistencies) {
     const inconsistencyId = forcedInconsistencyId ?? getStableInconsistencyId(inconsistency);
+    if ([...passageAnchors.entries.values()].some((entry) => entry.data.issueId === inconsistencyId)) {
+      for (const position of getAffectedFactPositions(inconsistency)) {
+        if (position.textDeleted) continue;
+        const isConflict = position.fact === getConflictingFact(inconsistency);
+        const saved = position.anchorKey ? passageAnchors.entries.get(position.anchorKey) : undefined;
+        if (saved?.contextRange) ranges.push(...getRangeTextFragments(saved.contextRange).map((fragment) => ({
+          ...fragment, inconsistent: true as const, inconsistencyRole: "sentence" as const,
+          inconsistencyIds: [inconsistencyId], conflictInconsistencyIds: [],
+        })));
+        ranges.push(...getRangeTextFragments(position.range).map((fragment) => ({
+          ...fragment, inconsistent: true as const, inconsistencyRole: isConflict ? "conflict" as const : "context" as const,
+          inconsistencySeverity: isConflict ? inconsistency.severity : undefined, inconsistencyIds: [inconsistencyId],
+          conflictInconsistencyIds: isConflict ? [inconsistencyId] : [],
+        })));
+      }
+      continue;
+    }
     const conflictFact = getConflictingFact(inconsistency);
 
     for (const fact of inconsistency.facts) {
@@ -2307,7 +2480,20 @@ function getCharacterInconsistentTextRanges(
     const inconsistencyId = getStableCharacterInconsistencyId(inconsistency);
     const conflictEvidence = inconsistency.evidence.at(-1);
 
-    inconsistency.evidence.forEach((evidence) => {
+    inconsistency.evidence.forEach((evidence, evidenceIndex) => {
+      const saved = passageAnchors.entries.get(`${inconsistencyId}:evidence:${evidenceIndex}`);
+      if (saved && !saved.data.managed) {
+        if (saved.range && !passageAnchors.read(saved).deleted) {
+          const isConflict = evidence === conflictEvidence;
+          ranges.push(...getRangeTextFragments(saved.range).map((fragment) => ({
+            ...fragment, inconsistent: true as const,
+            inconsistencyRole: isConflict ? "conflict" as const : "context" as const,
+            inconsistencySeverity: isConflict ? characterSeverity(inconsistency.confidence) : undefined,
+            inconsistencyIds: [inconsistencyId], conflictInconsistencyIds: isConflict ? [inconsistencyId] : [],
+          })));
+        }
+        return;
+      }
       const block = editor.children[evidence.paragraphIndex];
       if (!block) return;
       const blockText = SlateNode.string(block);
@@ -2624,6 +2810,8 @@ function deserialize(
   }
 
   async function handleAnalyze() {
+    passageAnchors.clear();
+    locationMarkerLoggedSizesRef.current.clear();
     const analysisStartedAt = performance.now();
     let analysisOutcome = "completed";
     logStudyEvent("analysis_started", {
@@ -2641,6 +2829,17 @@ function deserialize(
         setAnalysisError("The editor is empty.");
         return;
       }
+
+      resetAnalysisWorkflow();
+      prepareFullAnalysis(editor);
+      setDocument([...editor.children]);
+      setInconsistencies([]);
+      setCharacterInconsistencies([]);
+      setInconsistentRanges([]);
+      setInconsistentPaths([]);
+      setActiveInconsistencyId(null);
+      setSelectedInconsistencyId(null);
+      selectedInconsistencyIdRef.current = null;
 
       const cacheKey = `${JSON.stringify(context)}\n${text}`;
       const cached = useExampleFactsRef.current
@@ -2693,13 +2892,8 @@ function deserialize(
         result = await extractFacts(text, context);
       }
 
-      setAnalysis(result);
-
       const foundInconsistencies =
         checkConsistency(result);
-
-      setInconsistencies(foundInconsistencies);
-      setHiddenInconsistencyIds(new Set());
 
       const paths = getInconsistentPaths(
         editor,
@@ -2715,19 +2909,23 @@ function deserialize(
         }))
       );
 
-      setInconsistentPaths(paths);
-      setInconsistentRanges(
-        getInconsistentTextRanges(editor, foundInconsistencies)
-      );
-
       try {
-        const foundCharacterInconsistencies = useExampleFactsRef.current
+        const characterCandidates = useExampleFactsRef.current
           ? useExampleFactsRef.current === "bellwick"
             ? EXAMPLE_CHARACTER_INCONSISTENCIES
             : SECOND_EXAMPLE_CHARACTER_INCONSISTENCIES
           : await checkCharacterConsistency(text);
+        const categoryComparison = await reconcileConsistencyCategories(
+          text, foundInconsistencies, characterCandidates, result.entities
+        );
+        const foundCharacterInconsistencies = categoryComparison.characters;
+        // Publish both categories together so a new fact result is never paired
+        // with character findings left over from the previous document version.
+        setAnalysis(result);
+        setInconsistencies(foundInconsistencies);
+        setHiddenInconsistencyIds(new Set());
         setCharacterInconsistencies(foundCharacterInconsistencies);
-        setCharacterAnalysisError("");
+        setCharacterAnalysisError(categoryComparison.warning ?? "");
         console.log(
           "Character inconsistencies with editor paths:",
           foundCharacterInconsistencies.map((inconsistency, index) => ({
@@ -2754,7 +2952,7 @@ function deserialize(
           ...getInconsistentTextRanges(editor, foundInconsistencies),
           ...getCharacterInconsistentTextRanges(editor, foundCharacterInconsistencies),
         ]);
-        if (!useExampleFactsRef.current) {
+        if (!useExampleFactsRef.current && !categoryComparison.warning) {
           analysisCacheRef.current.set(cacheKey, {
             result,
             factInconsistencies: foundInconsistencies,
@@ -2767,6 +2965,11 @@ function deserialize(
         }
       } catch (characterError) {
         console.error(characterError);
+        setAnalysis(result);
+        setInconsistencies(foundInconsistencies);
+        setHiddenInconsistencyIds(new Set());
+        setInconsistentPaths(paths);
+        setInconsistentRanges(getInconsistentTextRanges(editor, foundInconsistencies));
         setCharacterInconsistencies([]);
         setCharacterAnalysisError(
           characterError instanceof Error
@@ -2955,6 +3158,38 @@ function deserialize(
   }
 
   function getAffectedFactPositions(inconsistency: Inconsistency): AffectedFactPosition[] {
+    const issueId = getStableInconsistencyId(inconsistency);
+    if (passageResolvedIds.has(issueId)) return [];
+    const saved = [...passageAnchors.entries].filter(([, entry]) =>
+      entry.data.issueId === issueId && entry.data.position && !entry.data.managed
+    );
+    if (!saved.length) return findAffectedFactPositions(inconsistency);
+    const retained = saved.flatMap(([key, entry]) => {
+      const state = passageAnchors.read(entry);
+      const position = entry.data.position!;
+      const navigationRange = getPassageNavigationRange(editor, entry);
+      if (entry.range && Array.from(Editor.nodes(editor, { at: entry.range, match: Text.isText }))
+        .some(([node]) => Text.isText(node) && (node.changeType || node.confirmedCorrect))) return [];
+      const current = {
+        ...position, range: entry.range ?? navigationRange ?? position.range,
+        navigationRange,
+        previewText: state.changed && !state.deleted
+          ? entry.contextRange ? Editor.string(editor, entry.contextRange) : state.text
+          : position.previewText || entry.original,
+        textChanged: state.changed, textDeleted: state.deleted, anchorKey: key,
+      };
+      return confirmedPositionKeys.has(getAffectedPositionKey(inconsistency, current)) ? [] : [current];
+    });
+    const discovered = findAffectedFactPositions(inconsistency).filter((position) =>
+      !retained.some((current) => Range.intersection(current.range, position.range) ||
+        current.fact === position.fact)
+    );
+    return [...retained, ...discovered].sort((a, b) =>
+      Path.compare(a.range.anchor.path, b.range.anchor.path) || a.range.anchor.offset - b.range.anchor.offset
+    );
+  }
+
+  function findAffectedFactPositions(inconsistency: Inconsistency): AffectedFactPosition[] {
     const positions = new Map<string, AffectedFactPosition>();
     const inconsistencyId = getStableInconsistencyId(inconsistency);
 
@@ -3095,6 +3330,7 @@ function deserialize(
     inconsistency: Inconsistency,
     position: AffectedFactPosition
   ): string {
+    if (position.anchorKey) return position.anchorKey;
     const { anchor, focus } = position.range;
     return `${getStableInconsistencyId(inconsistency)}:${anchor.path.join(".")}:${anchor.offset}:${focus.path.join(".")}:${focus.offset}`;
   }
@@ -3180,7 +3416,7 @@ function deserialize(
     // source offsets. Promote those exact card ranges to conflict decorations
     // so the count, bubbles, and red text highlighting always agree.
     const affectedRanges = affectedPositions.flatMap(
-      ({ range }) => getRangeTextFragments(range).map((fragment) => ({
+      ({ range, textDeleted }) => (textDeleted ? [] : getRangeTextFragments(range)).map((fragment) => ({
         ...fragment,
         inconsistent: true as const,
         inconsistencyRole: "conflict" as const,
@@ -3235,6 +3471,10 @@ function deserialize(
     );
     const changeId = `tracked-change-${nextTrackedChangeId.current++}`;
     const affectedRangeRef = Editor.rangeRef(editor, position.range, { affinity: "outward" });
+    if (position.anchorKey) {
+      const saved = passageAnchors.entries.get(position.anchorKey);
+      if (saved) saved.data.managed = true;
+    }
 
     Transforms.setNodes<CustomText>(
       editor,
@@ -3263,6 +3503,15 @@ function deserialize(
     }]);
     setExpandedTrackedChangeId(changeId);
     setConfirmedPositionKeys((current) => new Set(current).add(positionKey));
+    logStudyEvent("passage_confirmed", {
+      inconsistency_id: inconsistencyId,
+      inconsistency_type: "story_fact",
+      source: "looks_good",
+      confirmation_id: changeId,
+      passage_key: positionKey,
+      paragraph_index: position.range.anchor.path[0],
+      confirmed_text: (position.previewText ?? Editor.string(editor, position.range)).slice(0, 2000),
+    });
     if (suggestionTarget === inconsistency) {
       setSuggestionTarget(null);
       setSuggestionDraft("");
@@ -3303,6 +3552,9 @@ function deserialize(
     inconsistency: Inconsistency,
     position: AffectedFactPosition
   ) {
+    const saved = position.anchorKey ? passageAnchors.entries.get(position.anchorKey) : undefined;
+    const navigationRange = saved ? getPassageNavigationRange(editor, saved) : position.navigationRange === null ? null : position.navigationRange ?? position.range;
+    if (!navigationRange) return;
     const inconsistencyId = getStableInconsistencyId(inconsistency);
     setActiveInconsistencyId(inconsistencyId);
     setSelectedInconsistencyId(inconsistencyId);
@@ -3310,12 +3562,23 @@ function deserialize(
     // This action is navigation, not editing. Keeping a Slate selection here
     // leaves an inactive grey browser selection over the newly detected range
     // and visually hides its inconsistency decoration.
+    scrollToPassageLocation(() => saved ? getPassageNavigationRange(editor, saved) : navigationRange);
+  }
+
+  function scrollToPassageLocation(resolveRange: () => BaseRange | null) {
     Transforms.deselect(editor);
     requestAnimationFrame(() => {
       try {
-        const domRange = ReactEditor.toDOMRange(editor, position.range);
-        const element = domRange.startContainer.parentElement;
-        element?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        const currentRange = resolveRange();
+        if (!currentRange) return;
+        const domRange = ReactEditor.toDOMRange(editor, currentRange);
+        const container = editorScrollRef.current;
+        if (!container) return;
+        const rect = domRange.getBoundingClientRect();
+        const target = rect.height ? rect : domRange.startContainer.parentElement?.getBoundingClientRect();
+        if (!target) return;
+        const viewport = container.getBoundingClientRect();
+        container.scrollTo({ top: container.scrollTop + target.top - viewport.top - (container.clientHeight - target.height) / 2, behavior: "smooth" });
       } catch {
         // The position may have changed between rendering and clicking.
       }
@@ -3387,6 +3650,10 @@ function deserialize(
     affectedRangeRefs = occurrences.map((range) =>
       Editor.rangeRef(editor, range, { affinity: "outward" })
     );
+    targetPositions.forEach((position) => {
+      const saved = position.anchorKey ? passageAnchors.entries.get(position.anchorKey) : undefined;
+      if (saved) saved.data.managed = true;
+    });
 
     const changeId = `tracked-change-${nextTrackedChangeId.current++}`;
 
@@ -3451,9 +3718,12 @@ function deserialize(
         contexts: changeContexts,
       },
     ]);
-    logStudyEvent("suggestion_accepted", {
+    logStudyEvent("change_accepted", {
       inconsistency_id: getStableInconsistencyId(inconsistency),
       source: "direct",
+      change_type: "Replaced",
+      removed_texts: Array.from(replacedValues).map((value) => value.slice(0, 1000)),
+      added_text: replacement.slice(0, 1000),
       occurrence_count: occurrences.length,
       replacement_character_count: replacement.length,
     });
@@ -3564,6 +3834,10 @@ function deserialize(
     freeEditRangeRefs.current = selectedPositions.map(({ range }) =>
       Editor.rangeRef(editor, range, { affinity: "outward" })
     );
+    selectedPositions.forEach((position) => {
+      const saved = position.anchorKey ? passageAnchors.entries.get(position.anchorKey) : undefined;
+      if (saved) saved.data.managed = true;
+    });
     freeEditInconsistencyIdRef.current = getStableInconsistencyId(inconsistency);
     setVerifiedMarkerResults((current) => {
       const inconsistencyId = getStableInconsistencyId(inconsistency);
@@ -3591,8 +3865,10 @@ function deserialize(
     const restoreScrollPosition = captureEditorScrollPosition();
     const selectedEvidence = inconsistency.evidence[evidenceIndex];
     if (!selectedEvidence) return;
+    const savedEvidence = passageAnchors.entries.get(`${getStableCharacterInconsistencyId(inconsistency)}:evidence:${evidenceIndex}`);
+    const evidenceParagraph = savedEvidence?.range?.anchor.path[0] ?? selectedEvidence.paragraphIndex;
     const paragraphIndices = Array.from(new Set(
-      [selectedEvidence.paragraphIndex]
+      [evidenceParagraph]
     ));
     if (paragraphIndices.length === 0) return;
 
@@ -3602,8 +3878,9 @@ function deserialize(
     freeEditDocumentSnapshotRef.current = editor.children.map(getNodeText);
     freeEditDocumentNodesSnapshotRef.current = structuredClone(editor.children);
     freeEditRangeRefs.current = getCharacterInconsistentTextRanges(editor, [inconsistency])
-      .filter((range) => range.anchor.path[0] === selectedEvidence.paragraphIndex)
+      .filter((range) => range.anchor.path[0] === evidenceParagraph)
       .map((range) => Editor.rangeRef(editor, range, { affinity: "outward" }));
+    if (savedEvidence) savedEvidence.data.managed = true;
     freeEditInconsistencyIdRef.current = getStableCharacterInconsistencyId(inconsistency);
     setVerifiedMarkerResults((current) => {
       const inconsistencyId = getStableCharacterInconsistencyId(inconsistency);
@@ -3652,12 +3929,13 @@ function deserialize(
     inconsistency: CharacterInconsistency,
     evidenceIndex: number
   ) {
+    const saved = passageAnchors.entries.get(`${getStableCharacterInconsistencyId(inconsistency)}:evidence:${evidenceIndex}`);
     const evidence = inconsistency.evidence[evidenceIndex];
     const block = evidence ? editor.children[evidence.paragraphIndex] : undefined;
-    if (!evidence || !block) return;
-    const quoteStart = SlateNode.string(block).indexOf(evidence.quote);
-    if (quoteStart < 0) return;
-    const range = getBlockTextRange(
+    if (!evidence || (!saved && !block)) return;
+    const quoteStart = block ? SlateNode.string(block).indexOf(evidence.quote) : -1;
+    if (!saved && quoteStart < 0) return;
+    const range = saved ? getPassageNavigationRange(editor, saved) : getBlockTextRange(
       evidence.paragraphIndex,
       quoteStart,
       quoteStart + evidence.quote.length
@@ -3668,20 +3946,7 @@ function deserialize(
     setActiveInconsistencyId(issueId);
     setSelectedInconsistencyId(issueId);
     selectedInconsistencyIdRef.current = issueId;
-    Transforms.select(editor, range);
-    ReactEditor.focus(editor);
-    requestAnimationFrame(() => {
-      try {
-        const domRange = ReactEditor.toDOMRange(editor, range);
-        domRange.startContainer.parentElement?.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "nearest",
-        });
-      } catch (error) {
-        console.error("Navigation zur Character-Passage fehlgeschlagen:", error);
-      }
-    });
+    scrollToPassageLocation(() => saved ? getPassageNavigationRange(editor, saved) : range);
   }
 
   function confirmCharacterEvidence(
@@ -3690,18 +3955,20 @@ function deserialize(
   ) {
     const restoreScrollPosition = captureEditorScrollPosition();
     selectInconsistencyForAction(getStableCharacterInconsistencyId(inconsistency));
+    const saved = passageAnchors.entries.get(`${getStableCharacterInconsistencyId(inconsistency)}:evidence:${evidenceIndex}`);
     const evidence = inconsistency.evidence[evidenceIndex];
     const block = evidence ? editor.children[evidence.paragraphIndex] : undefined;
-    if (!evidence || !block) return;
-    const quoteStart = SlateNode.string(block).indexOf(evidence.quote);
-    if (quoteStart < 0) return;
-    const range = getBlockTextRange(
+    if (!evidence || (!saved && !block)) return;
+    const quoteStart = block ? SlateNode.string(block).indexOf(evidence.quote) : -1;
+    if (!saved && quoteStart < 0) return;
+    const range = saved ? saved.range : getBlockTextRange(
       evidence.paragraphIndex,
       quoteStart,
       quoteStart + evidence.quote.length
     );
     if (!range) return;
     const decisionId = `character-decision-${nextTrackedChangeId.current++}`;
+    if (saved) saved.data.managed = true;
 
     Transforms.setNodes<CustomText>(
       editor,
@@ -3730,6 +3997,15 @@ function deserialize(
       beforeBlocks: [],
       status: "valid",
     }]);
+    logStudyEvent("passage_confirmed", {
+      inconsistency_id: issueId,
+      inconsistency_type: "character_continuity",
+      source: "looks_good",
+      confirmation_id: decisionId,
+      evidence_index: evidenceIndex,
+      paragraph_index: evidence.paragraphIndex,
+      confirmed_text: evidence.quote.slice(0, 2000),
+    });
     setExpandedTrackedChangeId(decisionId);
     setDocument([...editor.children]);
     publishVerifiedMarkerResult(
@@ -3769,6 +4045,14 @@ function deserialize(
 
   function revertCharacterDecision(decision: CharacterDecision) {
     const restoreScrollPosition = captureEditorScrollPosition();
+    logStudyEvent("change_rejected", {
+      inconsistency_id: getStableCharacterInconsistencyId(decision.inconsistency),
+      source: decision.source,
+      change_type: decision.source === "confirmed" ? "Decision" : "Replaced",
+      removed_texts: decision.contexts.map((context) => context.original.slice(0, 1000)),
+      added_texts: decision.contexts.map((context) => context.replacement.slice(0, 1000)),
+      occurrence_count: decision.contexts.length,
+    });
     Transforms.deselect(editor);
     Editor.withoutNormalizing(editor, () => {
       if (decision.source === "free") {
@@ -3915,6 +4199,179 @@ function deserialize(
     });
   }
 
+  async function reanalyzeChangedPassage(target: Inconsistency | CharacterInconsistency) {
+    if (analyzing || passageRecheckInFlightRef.current) return;
+    passageRecheckInFlightRef.current = true;
+    const reanalysisStartedAt = performance.now();
+    const reanalysisAttemptId = crypto.randomUUID();
+    let reanalysisOutcome = "error";
+    let reanalysisResultMessage: string | null = null;
+    let returnedEvidenceCount = 0;
+    let reanalysisErrorMessage: string | null = null;
+    const factual = "facts" in target;
+    const issueId = factual ? getStableInconsistencyId(target) : getStableCharacterInconsistencyId(target);
+    const saved = [...passageAnchors.entries.values()].filter((entry) => entry.data.issueId === issueId);
+    const changes = saved.flatMap((entry) => {
+      if (entry.data.managed) return [];
+      const change = captureDirectPassageEdit(editor, entry);
+      return change ? [change] : [];
+    }).filter((change, index, all) => !all.slice(0, index).some((earlier) =>
+      earlier.before === change.before && earlier.after === change.after &&
+      JSON.stringify(earlier.range) === JSON.stringify(change.range)
+    ));
+    const records: DirectEditRecord[] = changes.map((change) => ({
+      id: `direct-edit-${nextTrackedChangeId.current++}`, issueId,
+      before: change.before, after: change.after,
+      rangeRef: change.range ? Editor.rangeRef(editor, change.range, { affinity: "outward" }) : null,
+      status: "checking",
+    }));
+    changes.forEach((change, changeIndex) => {
+      const hunks = getTextDiffHunks(change.before, change.after);
+      const removedTexts = hunks
+        .map((hunk) => change.before.slice(hunk.beforeStart, hunk.beforeEnd))
+        .filter(Boolean)
+        .slice(0, 10)
+        .map((text) => text.slice(0, 1000));
+      const addedTexts = hunks
+        .map((hunk) => change.after.slice(hunk.afterStart, hunk.afterEnd))
+        .filter(Boolean)
+        .slice(0, 10)
+        .map((text) => text.slice(0, 1000));
+      logStudyEvent("passage_change_submitted", {
+        inconsistency_id: issueId,
+        inconsistency_type: factual ? "story_fact" : "character_continuity",
+        source: "direct_editor_edit",
+        reanalysis_attempt_id: reanalysisAttemptId,
+        change_id: records[changeIndex]?.id ?? null,
+        change_type: removedTexts.length > 0 && addedTexts.length > 0
+          ? "Replaced"
+          : addedTexts.length > 0 ? "Added" : "Removed",
+        before_text: change.before.slice(0, 2000),
+        after_text: change.after.slice(0, 2000),
+        removed_texts: removedTexts,
+        added_texts: addedTexts,
+        paragraph_index: change.range?.anchor.path[0] ?? null,
+      });
+    });
+    logStudyEvent("reanalysis_started", {
+      inconsistency_id: issueId,
+      inconsistency_type: factual ? "story_fact" : "character_continuity",
+      source: "changed_passage",
+      reanalysis_attempt_id: reanalysisAttemptId,
+      change_count: changes.length,
+    });
+    const recordIds = new Set(records.map((record) => record.id));
+    setDirectEditRecords((current) => [
+      ...current.filter((record) => {
+        const replacedRetry = record.issueId === issueId && record.status === "error" && records.some((next) => next.before === record.before && next.after === record.after);
+        if (replacedRetry) record.rangeRef?.unref();
+        return !replacedRetry;
+      }), ...records,
+    ]);
+    const indices = new Set<number>();
+    saved.forEach((entry) => {
+      const range = entry.contextRange ?? entry.range;
+      if (range) {
+        const [start, end] = Range.edges(range);
+        for (let index = start.path[0]; index <= end.path[0]; index++) indices.add(index);
+      }
+    });
+    const paragraphs = [...indices].sort((a, b) => a - b).map((paragraphIndex) => ({
+      paragraphIndex, text: getEditorText([editor.children[paragraphIndex]]),
+    }));
+    const snapshot = getEditorText(editor.children);
+    setPassageRecheckErrors((current) => { const next = new Map(current); next.delete(issueId); return next; });
+    setActiveInconsistencyId(issueId);
+    setSelectedInconsistencyId(issueId);
+    selectedInconsistencyIdRef.current = issueId;
+    setAnalyzing(true);
+    setIncrementalRecheckActive(true);
+    setIncrementalRecheckRanges(saved.flatMap((entry) => {
+      const range = getPassageNavigationRange(editor, entry);
+      return range ? [range] : [];
+    }));
+    try {
+      let refreshed: Inconsistency | CharacterInconsistency | null = null;
+      if (factual) {
+        refreshed = await recheckStoryPassages(paragraphs, target, analysis?.entities ?? [], context);
+      } else {
+        const evidence = saved.flatMap((entry) => {
+          if (!entry.range || entry.data.evidenceIndex === undefined) return [];
+          const quote = Editor.string(editor, entry.range).trim();
+          const paragraphIndex = paragraphs.findIndex((paragraph) => paragraph.paragraphIndex === entry.range!.anchor.path[0]);
+          return quote && paragraphIndex >= 0 ? [{ ...target.evidence[entry.data.evidenceIndex], quote, paragraphIndex }] : [];
+        });
+        if (evidence.length >= 2) {
+          const results = await checkCharacterConsistency(paragraphs.map((paragraph) => paragraph.text).join("\n"), { ...target, evidence });
+          const matched = results.find((issue) => issue.character.toLowerCase() === target.character.toLowerCase() && issue.category === target.category);
+          if (matched) refreshed = { ...matched, evidence: matched.evidence.map((entry) => ({
+            ...entry, paragraphIndex: paragraphs[entry.paragraphIndex].paragraphIndex,
+          })) };
+        }
+      }
+      if (getEditorText(editor.children) !== snapshot) throw new Error("Text changed during the check. Please retry Reanalyze.");
+      reanalysisOutcome = refreshed ? "inconsistent" : "resolved";
+      reanalysisResultMessage = refreshed?.message ?? null;
+      returnedEvidenceCount = refreshed
+        ? "facts" in refreshed ? refreshed.facts.length : refreshed.evidence.length
+        : 0;
+      setDirectEditRecords((current) => current.map((record) => recordIds.has(record.id)
+        ? { ...record, status: refreshed ? "inconsistent" : "resolved" } : record));
+      if (refreshed) {
+        for (const [key, entry] of passageAnchors.entries) if (entry.data.issueId === issueId) passageAnchors.entries.delete(key);
+        if ("facts" in refreshed) {
+          stableInconsistencyIds.set(refreshed, issueId);
+          const next = inconsistencies.map((issue) => getStableInconsistencyId(issue) === issueId ? refreshed as Inconsistency : issue);
+          setInconsistencies(next);
+          setInconsistentRanges([...getInconsistentTextRanges(editor, next), ...getCharacterInconsistentTextRanges(editor, characterInconsistencies)]);
+        } else {
+          stableCharacterInconsistencyIds.set(refreshed, issueId);
+          const next = characterInconsistencies.map((issue) => getStableCharacterInconsistencyId(issue) === issueId ? refreshed as CharacterInconsistency : issue);
+          setCharacterInconsistencies(next);
+          setInconsistentRanges([...getInconsistentTextRanges(editor, inconsistencies), ...getCharacterInconsistentTextRanges(editor, next)]);
+        }
+        setSuccessfulInconsistencyId(null);
+        successfulInconsistencyIdRef.current = null;
+        setVerifiedMarkerResults((current) => { const next = new Map(current); next.delete(issueId); return next; });
+      } else {
+        // Keep the resolved card until its explicit Resolved action is confirmed.
+        saved.forEach((entry) => {
+          entry.original = entry.range ? Editor.string(editor, entry.range) : "";
+          entry.originalContext = entry.contextRange ? Editor.string(editor, entry.contextRange) : undefined;
+        });
+        setPassageResolvedIds((current) => new Set([...current, issueId]));
+        if (!factual) setHandledCharacterEvidenceKeys((current) => new Set([...current, ...target.evidence.map((_, index) => `${issueId}:${index}`)]));
+        setSuccessfulInconsistencyId(issueId);
+        successfulInconsistencyIdRef.current = issueId;
+        publishVerifiedMarkerResult(issueId, saved.length, 0);
+        setInconsistentRanges((current) => removeInconsistencyFromRanges(current, issueId));
+      }
+      setDocument([...editor.children]);
+    } catch (error) {
+      reanalysisErrorMessage = error instanceof Error ? error.message : "The passage could not be checked.";
+      setDirectEditRecords((current) => current.map((record) => recordIds.has(record.id) ? { ...record, status: "error" } : record));
+      setPassageRecheckErrors((current) => new Map(current).set(issueId,
+        error instanceof Error ? error.message : "The passage could not be checked. Please retry."));
+    } finally {
+      logStudyEvent("reanalysis_finished", {
+        inconsistency_id: issueId,
+        inconsistency_type: factual ? "story_fact" : "character_continuity",
+        source: "changed_passage",
+        reanalysis_attempt_id: reanalysisAttemptId,
+        outcome: reanalysisOutcome,
+        duration_ms: Math.round(performance.now() - reanalysisStartedAt),
+        change_count: changes.length,
+        returned_evidence_count: returnedEvidenceCount,
+        result_message: reanalysisResultMessage?.slice(0, 1000) ?? null,
+        error_message: reanalysisErrorMessage?.slice(0, 1000) ?? null,
+      });
+      passageRecheckInFlightRef.current = false;
+      setAnalyzing(false);
+      setIncrementalRecheckActive(false);
+      setIncrementalRecheckRanges([]);
+    }
+  }
+
   async function reevaluateParagraphs(
     paragraphIndices: number[],
     checkedInconsistency?: Inconsistency,
@@ -3933,7 +4390,7 @@ function deserialize(
       const resolvedRanges = new Map<string, BaseRange>();
       for (const range of [
         ...rememberedRanges,
-        ...getAffectedFactPositions(checkedInconsistency).map(({ range }) => range),
+        ...getAffectedFactPositions(checkedInconsistency).filter((position) => !position.textDeleted).map(({ range }) => range),
       ]) {
         resolvedRanges.set(
           `${range.anchor.path.join(".")}:${range.anchor.offset}:${range.focus.path.join(".")}:${range.focus.offset}`,
@@ -4616,12 +5073,21 @@ function deserialize(
       ? captureEditorScrollPosition()
       : null;
     const inconsistencyId = getStableInconsistencyId(change.inconsistency);
-    logStudyEvent(action === "accept" ? "suggestion_accepted" : "suggestion_rejected", {
+    logStudyEvent(action === "accept" ? "change_accepted" : "change_rejected", {
       inconsistency_id: inconsistencyId,
       source: change.source ?? "direct",
+      change_type: change.contexts.every((context) => !context.original)
+        ? "Added"
+        : change.contexts.every((context) => !context.replacement)
+        ? "Removed"
+        : change.source === "confirmed"
+        ? "Decision"
+        : "Replaced",
+      removed_texts: change.contexts.map((context) => context.original.slice(0, 1000)),
+      added_texts: change.contexts.map((context) => context.replacement.slice(0, 1000)),
       occurrence_count: change.occurrenceCount,
     });
-    finishInconsistencyWork(action === "accept" ? "suggestion_accepted" : "suggestion_rejected");
+    finishInconsistencyWork(action === "accept" ? "change_accepted" : "change_rejected");
     const entries = Array.from(
       Editor.nodes(editor, {
         at: [],
@@ -4831,14 +5297,40 @@ function deserialize(
 
   async function checkFreeChanges() {
     const editedInconsistencyId = freeEditInconsistencyIdRef.current;
+    const editedParagraphCount = freeEditParagraphs.length;
     const restoreScrollPosition = captureEditorScrollPosition();
+    const studyDiffs = freeEditParagraphs.flatMap((paragraphIndex) => {
+      const before = freeEditDocumentSnapshotRef.current[paragraphIndex] ?? "";
+      const after = editor.children[paragraphIndex]
+        ? getNodeText(editor.children[paragraphIndex])
+        : "";
+      if (before === after) return [];
+      let start = 0;
+      while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+      let beforeEnd = before.length;
+      let afterEnd = after.length;
+      while (beforeEnd > start && afterEnd > start && before[beforeEnd - 1] === after[afterEnd - 1]) {
+        beforeEnd -= 1;
+        afterEnd -= 1;
+      }
+      const removed = before.slice(start, beforeEnd);
+      const added = after.slice(start, afterEnd);
+      return [{
+        type: !removed ? "Added" : !added ? "Removed" : "Replaced",
+        removed: removed.slice(0, 1000),
+        added: added.slice(0, 1000),
+      }];
+    });
 
     try {
       await applyFreeChanges();
       if (editedInconsistencyId) {
         logStudyEvent("manual_edit_finished", {
           inconsistency_id: editedInconsistencyId,
-          paragraph_count: freeEditParagraphs.length,
+          paragraph_count: editedParagraphCount,
+          change_types: studyDiffs.map((diff) => diff.type),
+          removed_texts: studyDiffs.map((diff) => diff.removed),
+          added_texts: studyDiffs.map((diff) => diff.added),
         });
       }
     } finally {
@@ -5533,9 +6025,17 @@ function deserialize(
         : focusedEditRanges.length > 0
           ? focusedEditRanges
           : activeFactInconsistency
-            ? getAffectedFactPositions(activeFactInconsistency).map(({ range }) => range)
+            ? getAffectedFactPositions(activeFactInconsistency).flatMap((position) => {
+                const range = position.navigationRange === undefined ? position.range : position.navigationRange;
+                return range ? [range] : [];
+              })
             : activeCharacterInconsistency
-              ? getCharacterInconsistentTextRanges(editor, [activeCharacterInconsistency])
+              ? activeCharacterInconsistency.evidence.flatMap((_, evidenceIndex) => {
+                  if (handledCharacterEvidenceKeys.has(`${activeInconsistencyId}:${evidenceIndex}`)) return [];
+                  const saved = passageAnchors.entries.get(`${activeInconsistencyId}:evidence:${evidenceIndex}`);
+                  const range = saved ? getPassageNavigationRange(editor, saved) : null;
+                  return range ? [range] : [];
+                })
               : [];
       // A single passage may span several Slate leaves after typing or after
       // staging the old/new diff. It still owns only one local marker. Distinct
@@ -5589,7 +6089,9 @@ function deserialize(
                 ? first.top - second.top
                 : first.left - second.left
             );
-          const passageRect = paintedPassageRects[0] ?? passageDomRange.getBoundingClientRect();
+          const measuredRect = paintedPassageRects[0] ?? passageDomRange.getBoundingClientRect();
+          const passageRect = measuredRect.height > 0 ? measuredRect : passageDomRange.startContainer.parentElement?.getBoundingClientRect();
+          if (!passageRect) return [];
           if (passageRect.bottom < viewport.top || passageRect.top > viewport.bottom) return [];
           // The first painted line rectangle is more reliable than a collapsed
           // DOM range at the anchor. At a soft wrap browsers often report that
@@ -5749,19 +6251,62 @@ function deserialize(
       const button = target.closest<HTMLElement>("button, summary");
       if (!inconsistencyId || !button) return;
 
-      const action = button.classList.contains("conflict-card-content") ? "selected"
-        : button.classList.contains("conflict-card-position-preview") ? "passage_opened"
-        : button.classList.contains("conflict-card-position-edit") ? "manual_edit_started"
-        : button.classList.contains("conflict-card-position-confirm") ? "passage_confirmed"
-        : button.classList.contains("resolved-inconsistency-button") ? "resolved"
-        : button.classList.contains("resolve-inconsistency-button") ? "visibility_toggled"
-        : button.closest(".suggestion-editor") ? "suggestion_editor_action"
-        : button.closest(".tracked-change-dialog") ? "tracked_change_action"
+      const controlLabel = (button.getAttribute("aria-label") || button.textContent || "")
+        .replace(/\s+/g, " ").trim().slice(0, 120);
+      const normalizedLabel = controlLabel.toLowerCase();
+      const action = button.classList.contains("conflict-card-content")
+        ? button.getAttribute("aria-pressed") === "true" ? "card_deselected" : "card_selected"
+        : normalizedLabel.includes("reanalyze") || normalizedLabel.includes("checking")
+        ? "passage_reanalysis_requested"
+        : button.classList.contains("conflict-card-position-preview") ? "passage_navigated"
+        : button.classList.contains("conflict-card-position-edit") ? "edit_started"
+        : button.classList.contains("conflict-card-position-confirm") ? "looks_good_selected"
+        : button.classList.contains("resolved-inconsistency-button") ? "inconsistency_resolved"
+        : button.classList.contains("resolve-inconsistency-button")
+        ? button.getAttribute("aria-pressed") === "true" ? "inconsistency_shown" : "inconsistency_hidden"
+        : button.closest(".character-consistency-explanation") ? "explanation_toggled"
+        : normalizedLabel === "direct replacement" ? "direct_replacement_mode_selected"
+        : normalizedLabel === "edit freely" ? "free_edit_mode_selected"
+        : normalizedLabel === "add change" ? "change_added"
+        : normalizedLabel === "cancel" ? "edit_cancelled"
+        : normalizedLabel.includes("check these changes") ? "change_check_requested"
+        : normalizedLabel.includes("remove change") ? "change_removed"
+        : normalizedLabel.includes("revert decision") ? "decision_reverted"
+        : normalizedLabel.includes("collapse dialog") ? "change_details_collapsed"
+        : normalizedLabel === "show in text" ? "direct_edit_passage_navigated"
+        : button.classList.contains("tracked-change-context") ? "changed_passage_navigated"
+        : button.classList.contains("tracked-change-dialog--minimized") ? "change_details_expanded"
         : "card_control_clicked";
       startInconsistencyWork(inconsistencyId, "right_card");
       logStudyEvent("card_interaction", {
         inconsistency_id: inconsistencyId,
+        inconsistency_type: characterInconsistencies.some(
+          (item) => getStableCharacterInconsistencyId(item) === inconsistencyId
+        ) ? "character_continuity" : "story_fact",
         action,
+        control_label: controlLabel,
+        change_id: button.closest<HTMLElement>("[data-study-change-id]")?.dataset.studyChangeId ?? null,
+      });
+      return;
+    }
+
+    const panelControl = target.closest<HTMLElement>(
+      ".resolve-all-button, .category-visibility-button, .inconsistency-group > summary"
+    );
+    if (panelControl) {
+      const controlLabel = (panelControl.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      const panelContext = `${controlLabel} ${panelControl.closest(".inconsistency-group-shell")?.querySelector("summary")?.textContent ?? ""}`.toLowerCase();
+      const category = panelContext.includes("character") ? "character_continuity"
+        : panelContext.includes("story") ? "story_fact"
+        : "all";
+      logStudyEvent("inconsistency_panel_interaction", {
+        action: panelControl.classList.contains("resolve-all-button")
+          ? controlLabel.toLowerCase().includes("show") ? "show_all" : "hide_all"
+          : panelControl.classList.contains("category-visibility-button")
+          ? controlLabel.toLowerCase().includes("show") ? "show_category_markers" : "hide_category_markers"
+          : "category_toggled",
+        category,
+        control_label: controlLabel,
       });
       return;
     }
@@ -5847,6 +6392,58 @@ function deserialize(
     );
   }
 
+  useEffect(() => {
+    const ids = new Set([
+      ...inconsistencies.map(getStableInconsistencyId),
+      ...characterInconsistencies.map(getStableCharacterInconsistencyId),
+    ]);
+    for (const [key, entry] of passageAnchors.entries) {
+      if (!ids.has(entry.data.issueId)) passageAnchors.entries.delete(key);
+    }
+    for (const issue of inconsistencies) {
+      const issueId = getStableInconsistencyId(issue);
+      for (const position of findAffectedFactPositions(issue)) {
+        const existing = [...passageAnchors.entries.values()].filter((entry) => entry.data.issueId === issueId);
+        if (existing.some((entry) =>
+          (entry.range && Range.intersection(entry.range, position.range)) ||
+          (entry.data.position?.fact === position.fact && passageAnchors.read(entry).changed)
+        )) continue;
+        let contextRange: BaseRange | undefined;
+        const [start, end] = Range.edges(position.range);
+        if (start.path[0] === end.path[0]) {
+          const block = editor.children[start.path[0]];
+          let offset = 0;
+          let from = 0;
+          let to = 0;
+          for (const [node, path] of SlateNode.texts(block)) {
+            const fullPath = [start.path[0], ...path];
+            if (Path.equals(fullPath, start.path)) from = offset + start.offset;
+            if (Path.equals(fullPath, end.path)) to = offset + end.offset;
+            offset += node.text.length;
+          }
+          const sentence = getSentenceOffsets(SlateNode.string(block), from, to);
+          contextRange = getBlockTextRange(start.path[0], sentence.start, sentence.end) ?? position.range;
+        }
+        passageAnchors.add(getAffectedPositionKey(issue, position), position.range, { issueId, position }, contextRange);
+      }
+    }
+    for (const issue of characterInconsistencies) {
+      const issueId = getStableCharacterInconsistencyId(issue);
+      issue.evidence.forEach((evidence, evidenceIndex) => {
+        const block = editor.children[evidence.paragraphIndex];
+        if (!block) return;
+        const start = SlateNode.string(block).indexOf(evidence.quote);
+        if (start < 0) return;
+        const range = getBlockTextRange(evidence.paragraphIndex, start, start + evidence.quote.length);
+        if (range) {
+          const sentence = getSentenceOffsets(SlateNode.string(block), start, start + evidence.quote.length);
+          const contextRange = getBlockTextRange(evidence.paragraphIndex, sentence.start, sentence.end) ?? range;
+          passageAnchors.add(`${issueId}:evidence:${evidenceIndex}`, range, { issueId, evidenceIndex }, contextRange);
+        }
+      });
+    }
+  });
+
   return (
     <div
       className={`content-container${isFreeEditActive ? " content-container--free-edit-locked" : ""}`}
@@ -5890,6 +6487,15 @@ function deserialize(
             editor={editor}
             initialValue={initialValue}
             onValueChange={(value) => {
+              const reopened = [...passageResolvedIds].filter((id) =>
+                [...passageAnchors.entries.values()].some((entry) => entry.data.issueId === id && passageAnchors.read(entry).changed)
+              );
+              if (reopened.length) {
+                setPassageResolvedIds((current) => new Set([...current].filter((id) => !reopened.includes(id))));
+                setHandledCharacterEvidenceKeys((current) => new Set([...current].filter((key) => !reopened.some((id) => key.startsWith(`${id}:`)))));
+                setSuccessfulInconsistencyId(null);
+                successfulInconsistencyIdRef.current = null;
+              }
               if (
                 useExampleFactsRef.current &&
                 getEditorText(value) !== exampleDocumentTextRef.current
@@ -6018,7 +6624,7 @@ function deserialize(
           onAnalyze={handleAnalyze}
           analyzing={analyzing}
           documentZoom={documentZoom}
-          onDocumentZoomChange={setDocumentZoom}
+          onDocumentZoomChange={changeDocumentZoom}
         />
         <div
           ref={editorScrollShellRef}
@@ -6172,11 +6778,8 @@ function deserialize(
                   direction="above"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
-                    logStudyEvent("editor_marker_clicked", {
-                      inconsistency_id: navigationItems[marker.index]?.id,
-                      location: "above",
-                    });
                     focusOffscreenInconsistency(marker.index, "above");
                   }}
                 />
@@ -6191,11 +6794,8 @@ function deserialize(
                   direction="below"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
-                    logStudyEvent("editor_marker_clicked", {
-                      inconsistency_id: navigationItems[marker.index]?.id,
-                      location: "below",
-                    });
                     focusOffscreenInconsistency(marker.index, "below");
                   }}
                 />
@@ -6204,9 +6804,9 @@ function deserialize(
           )}
         </div>
         <div className="page-controls" aria-label="Seitennavigation">
-          <button type="button" onClick={() => navigateToPage(currentPage - 1)} disabled={currentPage === 0}>← Zurück</button>
+          <button type="button" onClick={() => navigateToPage(currentPage - 1, "page_controls")} disabled={currentPage === 0}>← Zurück</button>
           <span>Seite {currentPage + 1} von {pageCount}</span>
-          <button type="button" onClick={() => navigateToPage(currentPage + 1)} disabled={currentPage >= pageCount - 1}>Weiter →</button>
+          <button type="button" onClick={() => navigateToPage(currentPage + 1, "page_controls")} disabled={currentPage >= pageCount - 1}>Weiter →</button>
         </div>
         
       </Slate>
@@ -6324,16 +6924,18 @@ function deserialize(
                 </div>
               )}
               <div className="conflict-card-positions" aria-label="Affected passages">
+                {passageRecheckErrors.has(inconsistencyId) && <p className="passage-change-notice" role="alert">{passageRecheckErrors.get(inconsistencyId)}</p>}
                 <strong>{affectedPositions.length} affected {affectedPositions.length === 1 ? "passage" : "passages"} remaining</strong>
                 {affectedPositions.map((position, positionIndex) => (
                   <div
                     className="conflict-card-position"
-                    key={`${position.range.anchor.path.join(".")}-${position.range.anchor.offset}`}
+                    key={position.anchorKey ?? `${position.range.anchor.path.join(".")}-${position.range.anchor.offset}`}
                   >
                     <button
                       type="button"
                       className="conflict-card-position-preview"
                       onClick={() => navigateToAffectedPosition(inconsistency, position)}
+                      disabled={position.navigationRange === null}
                       title={position.previewText ?? Editor.string(editor, position.range)}
                     >
                       {position.previewText ?? Editor.string(editor, position.range)}
@@ -6342,7 +6944,7 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-edit"
                       onClick={() => openSuggestionEditor(inconsistency, positionIndex)}
-                      disabled={isResolutionReady || hasInvalidTrackedChange}
+                      disabled={isResolutionReady || hasInvalidTrackedChange || position.textDeleted || position.textChanged}
                     >
                       Edit
                     </button>
@@ -6350,10 +6952,16 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-confirm"
                       onClick={() => confirmAffectedPosition(inconsistency, position)}
-                      disabled={isResolutionReady || hasInvalidTrackedChange}
+                      disabled={isResolutionReady || hasInvalidTrackedChange || position.textDeleted || position.textChanged}
                     >
                       Looks good
                     </button>
+                    {position.textChanged && <div className="passage-change-notice passage-review-actions">
+                      <span className="passage-change-status">{position.textDeleted ? "Textstelle gelöscht" : "Text geändert"}</span>
+                      <button type="button" className="conflict-card-position-edit" disabled={analyzing}
+                        title="Check this inconsistency using its current passages and counterparts"
+                        onClick={() => reanalyzeChangedPassage(inconsistency)}>{isReevaluating ? "Checking…" : "Reanalyze"}</button>
+                    </div>}
                   </div>
                 ))}
               </div>
@@ -6422,6 +7030,7 @@ function deserialize(
                   </>}
                 </form>
               )}
+              {renderDirectEditHistory(inconsistencyId)}
               {cardTrackedChanges.map((change) => (
                 <TrackedChangeDialog
                   key={change.id}
@@ -6551,6 +7160,7 @@ function deserialize(
               </div>
             )}
             <div className="conflict-card-positions" aria-label="Affected character passages">
+              {passageRecheckErrors.has(issueId) && <p className="passage-change-notice" role="alert">{passageRecheckErrors.get(issueId)}</p>}
               <strong>
                 {issue.evidence.filter((_, evidenceIndex) =>
                   !handledCharacterEvidenceKeys.has(`${issueId}:${evidenceIndex}`)
@@ -6559,20 +7169,23 @@ function deserialize(
               {issue.evidence.map((evidence, evidenceIndex) => {
                 const isHandled = handledCharacterEvidenceKeys.has(`${issueId}:${evidenceIndex}`);
                 if (isHandled) return null;
+                const saved = passageAnchors.entries.get(`${issueId}:evidence:${evidenceIndex}`);
+                const passageState = saved && !saved.data.managed ? passageAnchors.read(saved) : null;
                 return (
                   <div className="conflict-card-position" key={`${evidence.paragraphIndex}-position-${evidenceIndex}`}>
                     <button
                       type="button"
                       className="conflict-card-position-preview"
                       onClick={() => navigateToCharacterEvidence(issue, evidenceIndex)}
+                      disabled={Boolean(saved && !getPassageNavigationRange(editor, saved))}
                     >
-                      “{evidence.quote}”
+                      “{passageState?.text || evidence.quote}”
                     </button>
                     <button
                       type="button"
                       className="conflict-card-position-edit"
                       onClick={() => beginCharacterFreeEditing(issue, evidenceIndex)}
-                      disabled={isResolutionReady || hasInvalidCharacterChange}
+                      disabled={isResolutionReady || hasInvalidCharacterChange || passageState?.changed}
                     >
                       Edit
                     </button>
@@ -6580,10 +7193,16 @@ function deserialize(
                       type="button"
                       className="conflict-card-position-confirm"
                       onClick={() => confirmCharacterEvidence(issue, evidenceIndex)}
-                      disabled={isResolutionReady || hasInvalidCharacterChange}
+                      disabled={isResolutionReady || hasInvalidCharacterChange || passageState?.changed}
                     >
                       Looks good
                     </button>
+                    {passageState?.changed && <div className="passage-change-notice passage-review-actions">
+                      <span className="passage-change-status">{passageState.deleted ? "Textstelle gelöscht" : "Text geändert"}</span>
+                      <button type="button" className="conflict-card-position-edit" disabled={analyzing}
+                        title="Check this inconsistency using its current passages and counterparts"
+                        onClick={() => reanalyzeChangedPassage(issue)}>{isReevaluating ? "Checking…" : "Reanalyze"}</button>
+                    </div>}
                   </div>
                 );
               })}
@@ -6621,6 +7240,7 @@ function deserialize(
                 {isHidden ? "Show" : "Hide"}
               </button>
             </div>
+            {renderDirectEditHistory(issueId)}
             {issueDecisions.map((decision) => (
               <CharacterDecisionDialog
                 key={decision.id}
@@ -6668,7 +7288,7 @@ function CharacterDecisionDialog({ expanded, decision, onToggle, onReject }: {
         ? "Re-analysis found that this change does not resolve the character inconsistency. Revert it and edit the original passage again."
         : "This character passage was edited freely and passed re-analysis.";
   return expanded ? (
-    <aside className={`tracked-change-dialog tracked-change-dialog--inline ${stateClass}`}>
+    <aside data-study-change-id={decision.id} className={`tracked-change-dialog tracked-change-dialog--inline ${stateClass}`}>
       <div className="tracked-change-dialog-header">
         <strong className="tracked-change-dialog-title">{title} · Character Continuity</strong>
         <button type="button" onClick={onToggle} aria-label="Collapse dialog">−</button>
@@ -6684,7 +7304,7 @@ function CharacterDecisionDialog({ expanded, decision, onToggle, onReject }: {
       <div className="tracked-change-actions"><button type="button" onClick={onReject} disabled={decision.status === "pending"}>Revert decision</button></div>
     </aside>
   ) : (
-    <button type="button" className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized ${stateClass}`} onClick={onToggle}>
+    <button type="button" data-study-change-id={decision.id} className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized ${stateClass}`} onClick={onToggle}>
       <strong>{title}</strong><span>Character Continuity</span>
     </button>
   );
@@ -6716,6 +7336,7 @@ function TrackedChangeDialog({
   return !expanded ? (
       <button
         type="button"
+        data-study-change-id={change.id}
         className={`tracked-change-dialog tracked-change-dialog--inline tracked-change-dialog--minimized${invalid ? " tracked-change-card--invalid" : pending ? " tracked-change-card--pending" : change.accepted ? " tracked-change-card--accepted" : ""}`}
         onClick={onToggle}
         title={`Expand ${shortTitle}`}
@@ -6726,6 +7347,7 @@ function TrackedChangeDialog({
       </button>
     ) : (
     <aside
+      data-study-change-id={change.id}
       className={`tracked-change-dialog tracked-change-dialog--inline${invalid ? " tracked-change-card--invalid" : pending ? " tracked-change-card--pending" : change.accepted ? " tracked-change-card--accepted" : ""}`}
       aria-label="Tracked change"
     >
@@ -6788,14 +7410,17 @@ function OffscreenMarker({
   direction,
   marker,
   selected,
+  loggedSizes,
   onClick,
 }: {
   direction: "above" | "below";
   marker: OffscreenInconsistency;
   selected: boolean;
+  loggedSizes: Map<string, number>;
   onClick: () => void;
 }) {
   const markerSize = Math.max(32, marker.occurrenceCount * 16 + 8);
+  const hoverStartedAtRef = useRef<number | null>(null);
   const markerHistoryKey = `${direction}:${marker.index}`;
   const [displayedMarkerSize, setDisplayedMarkerSize] = useState(() => {
     const previous = offscreenMarkerSizeHistory.get(markerHistoryKey);
@@ -6815,6 +7440,44 @@ function OffscreenMarker({
     return () => window.cancelAnimationFrame(frame);
   }, [markerHistoryKey, markerSize]);
 
+  useEffect(() => {
+    const loggingKey = `${marker.inconsistencyId}:${direction}`;
+    const previousSize = loggedSizes.get(loggingKey);
+    if (previousSize === undefined) {
+      loggedSizes.set(loggingKey, markerSize);
+      logStudyEvent("location_marker_created", {
+        inconsistency_id: marker.inconsistencyId,
+        direction,
+        severity: marker.severity,
+        category: marker.label,
+        detail: marker.detail,
+        passage_count: marker.occurrenceCount,
+        successful: marker.successful,
+        resolution_ready: marker.resolutionReady,
+        opacity: Number(marker.opacity.toFixed(3)),
+        edge_offset_px: Math.round(marker.edgeOffset),
+        marker_size_px: markerSize,
+        selected,
+      });
+      return;
+    }
+    if (previousSize === markerSize) return;
+    loggedSizes.set(loggingKey, markerSize);
+    logStudyEvent("location_marker_size_changed", {
+      inconsistency_id: marker.inconsistencyId,
+      direction,
+      severity: marker.severity,
+      category: marker.label,
+      passage_count: marker.occurrenceCount,
+      successful: marker.successful,
+      resolution_ready: marker.resolutionReady,
+      previous_marker_size_px: previousSize,
+      marker_size_px: markerSize,
+      size_change: markerSize > previousSize ? "increased" : "decreased",
+      selected,
+    });
+  }, [direction, loggedSizes, marker, markerSize, selected]);
+
   if (marker.occurrenceCount <= 0) return null;
 
   const countStatus = marker.successful ? "treated" : "open";
@@ -6833,7 +7496,41 @@ function OffscreenMarker({
         "--marker-opacity": marker.opacity,
         "--marker-size": `${displayedMarkerSize}px`,
       } as React.CSSProperties}
-      onClick={onClick}
+      onPointerEnter={() => {
+        hoverStartedAtRef.current = performance.now();
+      }}
+      onPointerLeave={() => {
+        if (hoverStartedAtRef.current === null) return;
+        const durationMs = Math.round(performance.now() - hoverStartedAtRef.current);
+        hoverStartedAtRef.current = null;
+        if (durationMs < MIN_STUDY_HOVER_DURATION_MS) return;
+        logStudyEvent("location_marker_hovered", {
+          inconsistency_id: marker.inconsistencyId,
+          direction,
+          severity: marker.severity,
+          passage_count: marker.occurrenceCount,
+          successful: marker.successful,
+          duration_ms: durationMs,
+        });
+      }}
+      onClick={() => {
+        logStudyEvent("location_marker_clicked", {
+          inconsistency_id: marker.inconsistencyId,
+          direction,
+          severity: marker.severity,
+          category: marker.label,
+          detail: marker.detail,
+          passage_count: marker.occurrenceCount,
+          successful: marker.successful,
+          resolution_ready: marker.resolutionReady,
+          opacity: Number(marker.opacity.toFixed(3)),
+          edge_offset_px: Math.round(marker.edgeOffset),
+          marker_size_px: displayedMarkerSize,
+          selected,
+        });
+        startInconsistencyWork(marker.inconsistencyId, "location_marker");
+        onClick();
+      }}
       aria-pressed={selected}
       aria-label={`${label}. Scroll to this inconsistency.`}
     >
@@ -6866,10 +7563,10 @@ function Toolbar({
     onAnalyze: () => void;
     analyzing: boolean;
     documentZoom: number;
-    onDocumentZoomChange: (zoom: number) => void;
+    onDocumentZoomChange: (zoom: number, source: string) => void;
 }) {
-  const changeZoom = (nextZoom: number) => {
-    onDocumentZoomChange(Math.min(180, Math.max(60, nextZoom)));
+  const changeZoom = (nextZoom: number, source: string) => {
+    onDocumentZoomChange(Math.min(180, Math.max(60, nextZoom)), source);
   };
 
   return (
@@ -6907,7 +7604,7 @@ function Toolbar({
       <div className="document-zoom-controls" role="group" aria-label="Document zoom">
         <button
           type="button"
-          onClick={() => changeZoom(documentZoom - 10)}
+          onClick={() => changeZoom(documentZoom - 10, "zoom_out")}
           disabled={documentZoom <= 60}
           aria-label="Zoom out"
           title="Zoom out"
@@ -6917,7 +7614,7 @@ function Toolbar({
         <button
           type="button"
           className="document-zoom-value"
-          onClick={() => changeZoom(100)}
+          onClick={() => changeZoom(100, "zoom_reset")}
           aria-label={`Reset document zoom. Current zoom ${documentZoom} percent`}
           title="Reset to 100%"
         >
@@ -6925,7 +7622,7 @@ function Toolbar({
         </button>
         <button
           type="button"
-          onClick={() => changeZoom(documentZoom + 10)}
+          onClick={() => changeZoom(documentZoom + 10, "zoom_in")}
           disabled={documentZoom >= 180}
           aria-label="Zoom in"
           title="Zoom in"
@@ -7193,6 +7890,9 @@ function renderLeaf({
     children = <del className={`tracked-deletion${leaf.changeAccepted ? " tracked-deletion--accepted" : ""}`}>{children}</del>;
   } else if (leaf.changeType === "insertion") {
     children = <ins className={`tracked-insertion${leaf.changeAccepted ? " tracked-insertion--accepted" : ""}`}>{children}</ins>;
+  }
+  if (leaf.directEditStatus && !leaf.changeType) {
+    children = <ins className={`direct-edit-insertion direct-edit-insertion--${leaf.directEditStatus}`}>{children}</ins>;
   }
 
   if (

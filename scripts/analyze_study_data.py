@@ -22,15 +22,25 @@ KNOWN_EVENTS = {
     "inconsistency_selected",
     "editor_marker_clicked",
     "editor_marker_hovered",
+    "location_marker_created",
+    "location_marker_clicked",
+    "location_marker_hovered",
     "navigation_marker_clicked",
     "navigation_marker_hovered",
     "context_preview_clicked",
     "card_interaction",
+    "inconsistency_panel_interaction",
     "inconsistency_work_started",
     "inconsistency_work_finished",
     "suggestion_accepted",
     "suggestion_rejected",
+    "change_accepted",
+    "change_rejected",
+    "passage_confirmed",
+    "text_edited",
     "manual_edit_finished",
+    "page_changed",
+    "zoom_changed",
     "undo",
     "study_completed",
     "error",
@@ -296,14 +306,22 @@ def analyze_sessions(
             "total_work_ms": work_ms,
             "total_work_seconds": round(work_ms / 1000, 3),
             "editor_marker_clicks": counts["editor_marker_clicked"],
+            "location_marker_created": counts["location_marker_created"],
+            "location_marker_clicks": counts["location_marker_clicked"],
+            "location_marker_hovers": counts["location_marker_hovered"],
             "navigation_marker_clicks": counts["navigation_marker_clicked"],
             "editor_marker_hovers": counts["editor_marker_hovered"],
             "navigation_marker_hovers": counts["navigation_marker_hovered"],
             "context_preview_clicks": counts["context_preview_clicked"],
             "card_interactions": counts["card_interaction"],
-            "suggestions_accepted": counts["suggestion_accepted"],
-            "suggestions_rejected": counts["suggestion_rejected"],
+            "panel_interactions": counts["inconsistency_panel_interaction"],
+            "changes_accepted": counts["change_accepted"] + counts["suggestion_accepted"],
+            "changes_rejected": counts["change_rejected"] + counts["suggestion_rejected"],
+            "passages_confirmed": counts["passage_confirmed"],
+            "text_edits": counts["text_edited"],
             "manual_edits_finished": counts["manual_edit_finished"],
+            "page_changes": counts["page_changed"],
+            "zoom_changes": counts["zoom_changed"],
             "undo_count": counts["undo"],
             "error_count": counts["error"],
             "quality_issue_count": issue_count,
@@ -335,6 +353,10 @@ def analyze_inconsistencies(grouped: dict[str, list[Event]]) -> list[dict[str, A
                 max(0, numeric(event.payload.get("duration_ms")))
                 for event in ordered if event.event_type == "navigation_marker_hovered"
             )
+            location_hover_ms = sum(
+                max(0, numeric(event.payload.get("duration_ms")))
+                for event in ordered if event.event_type == "location_marker_hovered"
+            )
             card_actions = Counter(
                 str(event.payload.get("action", "unknown"))
                 for event in ordered if event.event_type == "card_interaction"
@@ -361,6 +383,10 @@ def analyze_inconsistencies(grouped: dict[str, list[Event]]) -> list[dict[str, A
                 "selection_changed_work_sessions": outcomes["selection_changed"],
                 "deselected_work_sessions": outcomes["deselected"],
                 "editor_marker_clicks": counts["editor_marker_clicked"],
+                "location_marker_created": counts["location_marker_created"],
+                "location_marker_clicks": counts["location_marker_clicked"],
+                "location_marker_hovers": counts["location_marker_hovered"],
+                "location_marker_hover_ms": location_hover_ms,
                 "navigation_marker_clicks": counts["navigation_marker_clicked"],
                 "editor_marker_hovers": counts["editor_marker_hovered"],
                 "editor_marker_hover_ms": editor_hover_ms,
@@ -372,8 +398,10 @@ def analyze_inconsistencies(grouped: dict[str, list[Event]]) -> list[dict[str, A
                 ),
                 "card_interactions": counts["card_interaction"],
                 "card_action_counts_json": json.dumps(dict(sorted(card_actions.items())), sort_keys=True),
-                "suggestions_accepted": counts["suggestion_accepted"],
-                "suggestions_rejected": counts["suggestion_rejected"],
+                "changes_accepted": counts["change_accepted"] + counts["suggestion_accepted"],
+                "changes_rejected": counts["change_rejected"] + counts["suggestion_rejected"],
+                "passages_confirmed": counts["passage_confirmed"],
+                "text_edits": counts["text_edited"],
                 "manual_edits_finished": counts["manual_edit_finished"],
                 "undo_count": counts["undo"],
                 "work_outcomes_json": json.dumps(dict(sorted(outcomes.items())), sort_keys=True),
@@ -388,10 +416,12 @@ def analyze_participants(session_rows: list[dict[str, Any]]) -> list[dict[str, A
 
     output: list[dict[str, Any]] = []
     sum_fields = [
-        "total_events", "total_work_ms", "editor_marker_clicks", "navigation_marker_clicks",
-        "editor_marker_hovers", "navigation_marker_hovers", "context_preview_clicks",
-        "card_interactions",
-        "suggestions_accepted", "suggestions_rejected", "manual_edits_finished",
+        "total_events", "total_work_ms", "editor_marker_clicks", "location_marker_created",
+        "location_marker_clicks", "navigation_marker_clicks", "editor_marker_hovers",
+        "location_marker_hovers", "navigation_marker_hovers", "context_preview_clicks",
+        "card_interactions", "panel_interactions", "changes_accepted", "changes_rejected",
+        "passages_confirmed",
+        "text_edits", "manual_edits_finished", "page_changes", "zoom_changes",
         "undo_count", "error_count", "quality_issue_count",
     ]
     for participant, rows in sorted(grouped.items()):
