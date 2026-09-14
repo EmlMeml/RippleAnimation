@@ -111,7 +111,8 @@ export function logStudyEvent(
     activeWork &&
     payload.inconsistency_id === activeWork.inconsistencyId &&
     eventType !== "inconsistency_work_started" &&
-    eventType !== "inconsistency_work_finished"
+    eventType !== "inconsistency_work_finished" &&
+    eventType !== "location_marker_created"
   ) {
     activeWork.interactionCount += 1;
   }

@@ -387,7 +387,9 @@ ${numberedText}`;
   )) {
     throw new Error("The recheck returned passages that could not be located. Please retry the check.");
   }
-  const merged = candidates.filter((issue) => hasVerifiedCharacterEvidence(issue, text));
+  const merged = candidates.filter((issue) =>
+    hasVerifiedCharacterEvidence(issue, text)
+  );
 
   console.groupCollapsed(
     `[Character consistency] ${merged.length} issue${merged.length === 1 ? "" : "s"} ` +

@@ -13,6 +13,7 @@
 }
 
 .editor-container {
+  color-scheme: light;
   flex: 1 1 0;
   min-width: 0;
   width: auto;
@@ -43,6 +44,7 @@
 }
 
 .toolbar button {
+  color: #252b45;
   flex: 0 0 auto;
   padding: 5px 10px;
   border: 1px solid #3f496f;
@@ -62,10 +64,6 @@
 
 .toolbar button:hover{
   background: #6f7ba8;
-}
-
-.toolbar .analyze-text-button {
-  color: #252b45;
 }
 
 .document-zoom-controls {
@@ -131,9 +129,54 @@
 
 
 .editor {
+  color: #252b45;
   min-height: 300px;
   padding: 20px;
   outline: none;
+}
+
+.passage-change-status {
+  display: block;
+  margin-top: 5px;
+  color: #79520b;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.editor .direct-edit-insertion {
+  border-radius: 3px;
+  background: #dcfce7;
+  color: #166534;
+  text-decoration: underline;
+  text-decoration-color: #15803d;
+  text-underline-offset: 3px;
+}
+
+.passage-review-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.passage-review-actions .passage-change-status {
+  margin-top: 0;
+}
+
+.passage-change-notice {
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #fff4d6;
+  color: #79520b;
+  font-size: .78rem;
+}
+
+.conflict-card-position-preview:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .editor h1 {
