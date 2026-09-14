@@ -13,6 +13,7 @@
 }
 
 .editor-container {
+  color-scheme: light;
   flex: 1 1 0;
   min-width: 0;
   width: auto;
@@ -43,6 +44,7 @@
 }
 
 .toolbar button {
+  color: #252b45;
   flex: 0 0 auto;
   padding: 5px 10px;
   border: 1px solid #3f496f;
@@ -62,10 +64,6 @@
 
 .toolbar button:hover{
   background: #6f7ba8;
-}
-
-.toolbar .analyze-text-button {
-  color: #252b45;
 }
 
 .document-zoom-controls {
@@ -131,6 +129,7 @@
 
 
 .editor {
+  color: #252b45;
   min-height: 300px;
   padding: 20px;
   outline: none;
