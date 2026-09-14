@@ -15,7 +15,7 @@ This document defines the events and derived metrics used for the study data ana
 | `editor_marker_hovered` | An editor marker was hovered for at least 300 ms. | `inconsistency_id`, `duration_ms` |
 | `location_marker_created` | An offscreen location marker was observed for the first time in one direction during the current full analysis. Re-renders and opacity/position changes are ignored. | `inconsistency_id`, `direction`, `severity`, `category`, `detail`, `passage_count`, `successful`, `resolution_ready`, `opacity`, `edge_offset_px`, `marker_size_px`, `selected` |
 | `location_marker_size_changed` | A previously recorded location marker changed size. Opacity and position changes do not trigger this event. | `inconsistency_id`, `direction`, `passage_count`, `previous_marker_size_px`, `marker_size_px`, `size_change`, status fields |
-| `location_marker_clicked` | An offscreen location marker was used for navigation. | Same marker-state fields as `location_marker_created` |
+| `location_marker_clicked` | An offscreen location marker was selected and used for navigation. | Same marker-state fields as `location_marker_created`, plus `selected_before_click` and `selected_after_click` |
 | `location_marker_hovered` | A location marker was hovered for at least 300 ms. | `inconsistency_id`, `direction`, `severity`, `passage_count`, `successful`, `duration_ms` |
 | `navigation_marker_clicked` | A marker in the left navigation was clicked. | `inconsistency_id`, `page`, `severity` |
 | `navigation_marker_hovered` | A left-navigation marker was hovered for at least 300 ms. | `inconsistency_id`, `page`, `duration_ms` |
