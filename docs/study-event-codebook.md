@@ -13,7 +13,8 @@ This document defines the events and derived metrics used for the study data ana
 | `inconsistency_selected` | An inconsistency became the explicit focus. | `inconsistency_id`, `source` |
 | `editor_marker_clicked` | A highlighted marker in the editor was clicked. | `inconsistency_id`, `role` |
 | `editor_marker_hovered` | An editor marker was hovered for at least 300 ms. | `inconsistency_id`, `duration_ms` |
-| `location_marker_created` | An offscreen location marker was created at the upper or lower editor boundary. | `inconsistency_id`, `direction`, `severity`, `category`, `detail`, `passage_count`, `successful`, `resolution_ready`, `opacity`, `edge_offset_px`, `marker_size_px`, `selected` |
+| `location_marker_created` | An offscreen location marker was observed for the first time in one direction during the current full analysis. Re-renders and opacity/position changes are ignored. | `inconsistency_id`, `direction`, `severity`, `category`, `detail`, `passage_count`, `successful`, `resolution_ready`, `opacity`, `edge_offset_px`, `marker_size_px`, `selected` |
+| `location_marker_size_changed` | A previously recorded location marker changed size. Opacity and position changes do not trigger this event. | `inconsistency_id`, `direction`, `passage_count`, `previous_marker_size_px`, `marker_size_px`, `size_change`, status fields |
 | `location_marker_clicked` | An offscreen location marker was used for navigation. | Same marker-state fields as `location_marker_created` |
 | `location_marker_hovered` | A location marker was hovered for at least 300 ms. | `inconsistency_id`, `direction`, `severity`, `passage_count`, `successful`, `duration_ms` |
 | `navigation_marker_clicked` | A marker in the left navigation was clicked. | `inconsistency_id`, `page`, `severity` |
@@ -26,6 +27,9 @@ This document defines the events and derived metrics used for the study data ana
 | `change_accepted` | A direct or tracked change was applied or accepted. | `inconsistency_id`, `source`, `change_type`, `removed_texts`, `added_text` or `added_texts`, `occurrence_count` |
 | `change_rejected` | A change or author decision was removed or reverted. | `inconsistency_id`, `source`, `change_type`, `removed_texts`, `added_texts`, `occurrence_count` |
 | `passage_confirmed` | A passage was explicitly marked as **Looks good**. | `inconsistency_id`, `inconsistency_type`, `source`, `confirmation_id`, `confirmed_text`, passage/evidence location |
+| `passage_change_submitted` | A direct editor change was captured as a consolidated diff when **Reanalyze** was selected. | `inconsistency_id`, `inconsistency_type`, `reanalysis_attempt_id`, `change_id`, `change_type`, `before_text`, `after_text`, `removed_texts`, `added_texts`, `paragraph_index` |
+| `reanalysis_started` | A changed passage began reanalysis. | `inconsistency_id`, `inconsistency_type`, `reanalysis_attempt_id`, `source`, `change_count` |
+| `reanalysis_finished` | A reanalysis attempt completed, remained inconsistent, or failed. | `inconsistency_id`, `inconsistency_type`, `reanalysis_attempt_id`, `outcome`, `duration_ms`, `change_count`, `returned_evidence_count`, `result_message`, `error_message` |
 | `manual_edit_finished` | A free edit was submitted for review. It does not end work timing. | `inconsistency_id`, `paragraph_count`, `change_types`, `removed_texts`, `added_texts` |
 | `page_changed` | Page navigation was requested through the page controls or document overview. | `source`, `from_page`, `to_page`, `direction`, `page_count`, `zoom_percent` |
 | `zoom_changed` | The editor zoom was increased, decreased, or reset. | `source`, `previous_zoom_percent`, `new_zoom_percent` |

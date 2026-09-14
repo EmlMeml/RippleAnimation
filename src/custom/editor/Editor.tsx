@@ -166,6 +166,7 @@ type OffscreenInconsistency = {
   label: string;
   detail: string;
   edgeOffset: number;
+  targetScrollTop: number;
   opacity: number;
   occurrenceCount: number;
   successful: boolean;
@@ -1369,72 +1370,95 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
 
     if (!scrollToRange) return;
 
-    try {
-      const blockPath = [range.anchor.path[0]];
-      const point = Editor.start(editor, blockPath);
-
-      Transforms.select(editor, {
-        anchor: point,
-        focus: point,
-      });
-
-      const element = ReactEditor.toDOMNode(
-        editor,
-        Editor.node(editor, blockPath)[0]
-      );
-
-      element.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    } catch (error) {
-      console.error("Navigation zur Inkonsistenz fehlgeschlagen:", error);
-    }
+    // Card selection changes the rendered decorations. Resolve the DOM range
+    // after that update and scroll only the editor viewport. `scrollIntoView`
+    // would also be allowed to move the surrounding browser window.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      try {
+        const container = editorScrollRef.current;
+        if (!container) return;
+        const domRange = ReactEditor.toDOMRange(editor, range);
+        const rect = domRange.getBoundingClientRect();
+        const targetRect = rect.height
+          ? rect
+          : domRange.startContainer.parentElement?.getBoundingClientRect();
+        if (!targetRect) return;
+        const viewport = container.getBoundingClientRect();
+        container.scrollTo({
+          top: Math.max(
+            0,
+            container.scrollTop + targetRect.top + targetRect.height / 2 -
+              (viewport.top + viewport.height / 2)
+          ),
+          behavior: "smooth",
+        });
+      } catch (error) {
+        console.error("Navigation zur Inkonsistenz fehlgeschlagen:", error);
+      }
+    }));
   }
 
-  function focusOffscreenInconsistency(index: number, direction: "above" | "below") {
+  function focusOffscreenInconsistency(
+    index: number,
+    inconsistencyId: string,
+    direction: "above" | "below",
+    fallbackScrollTop: number
+  ) {
     const item = navigationItems[index];
     const scrollContainer = editorScrollRef.current;
     if (!item || !scrollContainer) return;
 
-    // Preserve the normal selection/card/logging behavior, but perform the
-    // actual scroll against the offscreen DOM passage represented by this
-    // directional marker instead of the closest (often already visible) range.
+    // Selecting an inconsistency changes its decorations. Let that render
+    // finish before resolving the passage represented by the directional
+    // marker; otherwise the old coordinate can be overwritten by the update.
     focusInconsistency(index, false, false, "editor_offscreen_marker");
-    const relatedChangeIds = new Set([
-      ...trackedChanges
-        .filter((change) => getStableInconsistencyId(change.inconsistency) === item.id)
-        .map((change) => change.id),
-      ...characterDecisions
-        .filter((decision) =>
-          getStableCharacterInconsistencyId(decision.inconsistency) === item.id
+
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const currentContainer = editorScrollRef.current;
+      if (!currentContainer) return;
+      const viewport = currentContainer.getBoundingClientRect();
+      const relatedChangeIds = new Set(
+        trackedChanges
+          .filter((change) => getStableInconsistencyId(change.inconsistency) === inconsistencyId)
+          .map((change) => change.id)
+      );
+      const candidates = Array.from(
+        currentContainer.querySelectorAll<HTMLElement>(
+          "[data-inconsistency-ids], [data-change-id]"
         )
-        .map((decision) => decision.id),
-    ]);
-    const viewport = scrollContainer.getBoundingClientRect();
-    const candidates = Array.from(scrollContainer.querySelectorAll<HTMLElement>(
-      "[data-inconsistency-ids], [data-change-id]"
-    )).filter((element) => {
-      const belongsToInconsistency =
-        element.dataset.inconsistencyRole !== "sentence" &&
-        element.dataset.inconsistencyIds?.split(" ").includes(item.id);
-      const belongsToChange = Boolean(
-        element.dataset.changeId && relatedChangeIds.has(element.dataset.changeId)
-      );
-      const rect = element.getBoundingClientRect();
-      return (belongsToInconsistency || belongsToChange) && (
-        direction === "above" ? rect.bottom < viewport.top : rect.top > viewport.bottom
-      );
-    });
-    const target = candidates.reduce<HTMLElement | null>((closest, candidate) => {
-      if (!closest) return candidate;
-      const closestRect = closest.getBoundingClientRect();
-      const candidateRect = candidate.getBoundingClientRect();
-      return direction === "above"
-        ? candidateRect.bottom > closestRect.bottom ? candidate : closest
-        : candidateRect.top < closestRect.top ? candidate : closest;
-    }, null);
-    target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      ).filter((element) => {
+        const isPassage = element.dataset.inconsistencyRole !== "sentence" &&
+          element.dataset.inconsistencyIds?.split(" ").includes(inconsistencyId);
+        const isChange = Boolean(
+          element.dataset.changeId && relatedChangeIds.has(element.dataset.changeId)
+        );
+        return isPassage || isChange;
+      });
+      const directionalCandidates = candidates
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter(({ rect }) => direction === "above"
+          ? rect.bottom < viewport.top
+          : rect.top > viewport.bottom
+        );
+      const target = directionalCandidates.reduce<{
+        element: HTMLElement;
+        rect: DOMRect;
+      } | null>((closest, candidate) => {
+        if (!closest) return candidate;
+        return direction === "above"
+          ? candidate.rect.bottom > closest.rect.bottom ? candidate : closest
+          : candidate.rect.top < closest.rect.top ? candidate : closest;
+      }, null);
+      const targetTop = target
+        ? currentContainer.scrollTop + target.rect.top + target.rect.height / 2 -
+          (viewport.top + viewport.height / 2)
+        : fallbackScrollTop;
+
+      currentContainer.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: "smooth",
+      });
+    }));
   }
 
   function handleInconsistencyHover(inconsistencyId: string | null) {
@@ -1576,20 +1600,27 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
         return [];
       }
 
-      const rects = elements.map((element) => element.getBoundingClientRect());
-      const aboveRects = rects.filter((rect) => rect.bottom < viewport.top);
-      const belowRects = rects.filter((rect) => rect.top > viewport.bottom);
+      const elementRects = elements.map((element) => ({
+        element,
+        rect: element.getBoundingClientRect(),
+      }));
+      const aboveRects = elementRects.filter(({ rect }) => rect.bottom < viewport.top);
+      const belowRects = elementRects.filter(({ rect }) => rect.top > viewport.bottom);
       const markerPositions = [];
 
       if (aboveRects.length > 0) {
-        const closestRect = aboveRects.reduce((closest, rect) =>
-          rect.bottom > closest.bottom ? rect : closest
+        const closest = aboveRects.reduce((current, candidate) =>
+          candidate.rect.bottom > current.rect.bottom ? candidate : current
         );
+        const closestRect = closest.rect;
 
         markerPositions.push({
           ...marker,
           direction: "above" as const,
           distance: viewport.top - closestRect.bottom,
+          targetScrollTop: scrollContainer.scrollTop +
+            closestRect.top + closestRect.height / 2 -
+            (viewport.top + viewport.height / 2),
           edgeOffset: Math.min(
             viewport.width - 14,
             Math.max(14, closestRect.left + closestRect.width / 2 - viewport.left)
@@ -1598,14 +1629,18 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       }
 
       if (belowRects.length > 0) {
-        const closestRect = belowRects.reduce((closest, rect) =>
-          rect.top < closest.top ? rect : closest
+        const closest = belowRects.reduce((current, candidate) =>
+          candidate.rect.top < current.rect.top ? candidate : current
         );
+        const closestRect = closest.rect;
 
         markerPositions.push({
           ...marker,
           direction: "below" as const,
           distance: closestRect.top - viewport.bottom,
+          targetScrollTop: scrollContainer.scrollTop +
+            closestRect.top + closestRect.height / 2 -
+            (viewport.top + viewport.height / 2),
           edgeOffset: Math.min(
             viewport.width - 14,
             Math.max(14, closestRect.left + closestRect.width / 2 - viewport.left)
@@ -1623,7 +1658,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       const markers = positions
         .filter((position) => position.direction === direction)
         .sort((a, b) => a.edgeOffset - b.edgeOffset)
-        .map(({ index, inconsistencyId, severity, emoji, label, detail, occurrenceCount, successful, resolutionReady, edgeOffset, distance }) => ({
+        .map(({ index, inconsistencyId, severity, emoji, label, detail, occurrenceCount, successful, resolutionReady, edgeOffset, targetScrollTop, distance }) => ({
           index,
           inconsistencyId,
           severity,
@@ -1634,6 +1669,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
           successful,
           resolutionReady,
           edgeOffset,
+          targetScrollTop,
           opacity: Math.max(
             0.18,
             1 - (distance / Math.max(1, viewport.height * 1.5)) * 0.82
@@ -6780,7 +6816,12 @@ function deserialize(
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
                   loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
-                    focusOffscreenInconsistency(marker.index, "above");
+                    focusOffscreenInconsistency(
+                      marker.index,
+                      marker.inconsistencyId,
+                      "above",
+                      marker.targetScrollTop
+                    );
                   }}
                 />
               ))}
@@ -6796,7 +6837,12 @@ function deserialize(
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
                   loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
-                    focusOffscreenInconsistency(marker.index, "below");
+                    focusOffscreenInconsistency(
+                      marker.index,
+                      marker.inconsistencyId,
+                      "below",
+                      marker.targetScrollTop
+                    );
                   }}
                 />
               ))}
@@ -7496,6 +7542,12 @@ function OffscreenMarker({
         "--marker-opacity": marker.opacity,
         "--marker-size": `${displayedMarkerSize}px`,
       } as React.CSSProperties}
+      onMouseDown={(event) => {
+        // The marker can disappear as soon as its target enters the viewport.
+        // Preventing native button focus keeps the browser window from trying
+        // to preserve the position of that disappearing focused element.
+        event.preventDefault();
+      }}
       onPointerEnter={() => {
         hoverStartedAtRef.current = performance.now();
       }}
