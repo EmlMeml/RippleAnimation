@@ -1351,10 +1351,13 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
       });
       return next;
     });
-    logStudyEvent("inconsistency_selected", {
-      inconsistency_id: inconsistencyId,
-      source: studySource,
-    });
+    const selectionChanged = selectedInconsistencyId !== inconsistencyId;
+    if (selectionChanged) {
+      logStudyEvent("inconsistency_selected", {
+        inconsistency_id: inconsistencyId,
+        source: studySource,
+      });
+    }
     startInconsistencyWork(inconsistencyId, studySource);
     scrollToInconsistencyCard(inconsistencyId);
     animationReplayVersion.current += 1;
@@ -4469,6 +4472,28 @@ function deserialize(
       return;
     }
 
+    const reanalysisAttemptId = crypto.randomUUID();
+    const reanalysisStartedAt = performance.now();
+    const checkedId = checkedInconsistency
+      ? getStableInconsistencyId(checkedInconsistency)
+      : null;
+    const reanalysisSource = candidateChangeIds.length > 0
+      ? "direct_replacement"
+      : "story_fact_change";
+    let reanalysisOutcome = "error";
+    let reanalysisResultMessage: string | null = null;
+    let reanalysisErrorMessage: string | null = null;
+    let returnedEvidenceCount = 0;
+    if (checkedId) {
+      logStudyEvent("reanalysis_started", {
+        inconsistency_id: checkedId,
+        inconsistency_type: "story_fact",
+        reanalysis_attempt_id: reanalysisAttemptId,
+        source: reanalysisSource,
+        change_count: Math.max(candidateChangeIds.length, rememberedRanges.length > 0 ? 1 : 0),
+      });
+    }
+
     setIncrementalRecheckActive(true);
     setIncrementalRecheckRanges(rememberedRanges);
     setAnalyzing(true);
@@ -4532,9 +4557,6 @@ function deserialize(
           ]
         : detectedInconsistencies.filter((item) => getInconsistentTextRanges(editor, [item]).length > 0);
 
-      const checkedId = checkedInconsistency
-        ? getStableInconsistencyId(checkedInconsistency)
-        : null;
       const previousOccurrenceCount = checkedInconsistency
         ? getAffectedFactPositions(checkedInconsistency).length
         : 0;
@@ -4618,6 +4640,11 @@ function deserialize(
       const isResolved = checkedInconsistency
         ? locallyRemainingOccurrenceCount === 0 && !refreshedCheckedInconsistency
         : false;
+      if (checkedId) {
+        reanalysisOutcome = isResolved ? "resolved" : "inconsistent";
+        reanalysisResultMessage = refreshedCheckedInconsistency?.message ?? null;
+        returnedEvidenceCount = refreshedCheckedInconsistency?.facts.length ?? 0;
+      }
       const reconciledInconsistencies = reconcileReevaluation(
         updatedInconsistencies,
         checkedInconsistency,
@@ -4712,6 +4739,9 @@ function deserialize(
       setJitterSuppressedIds(new Set());
     } catch (error) {
       console.error(error);
+      reanalysisErrorMessage = error instanceof Error
+        ? error.message
+        : "Unknown error during incremental analysis.";
       if (checkedInconsistency && isAIRateLimitError(error)) {
         await new Promise<void>((resolve) => {
           window.setTimeout(resolve, RATE_LIMIT_FALLBACK_DELAY_MS);
@@ -4762,6 +4792,20 @@ function deserialize(
         );
       }
     } finally {
+      if (checkedId) {
+        logStudyEvent("reanalysis_finished", {
+          inconsistency_id: checkedId,
+          inconsistency_type: "story_fact",
+          reanalysis_attempt_id: reanalysisAttemptId,
+          source: reanalysisSource,
+          outcome: reanalysisOutcome,
+          duration_ms: Math.round(performance.now() - reanalysisStartedAt),
+          change_count: Math.max(candidateChangeIds.length, rememberedRanges.length > 0 ? 1 : 0),
+          returned_evidence_count: returnedEvidenceCount,
+          result_message: reanalysisResultMessage?.slice(0, 1000) ?? null,
+          error_message: reanalysisErrorMessage?.slice(0, 1000) ?? null,
+        });
+      }
       setAnalyzing(false);
       setIncrementalRecheckActive(false);
       setIncrementalRecheckRanges([]);
@@ -4777,6 +4821,20 @@ function deserialize(
     evidenceIndices: number[] = []
   ) {
     const checkedId = getStableCharacterInconsistencyId(checkedInconsistency);
+    const reanalysisAttemptId = crypto.randomUUID();
+    const reanalysisStartedAt = performance.now();
+    const reanalysisSource = decisionId ? "character_change" : "character_retry";
+    let reanalysisOutcome = "error";
+    let reanalysisResultMessage: string | null = null;
+    let reanalysisErrorMessage: string | null = null;
+    let returnedEvidenceCount = 0;
+    logStudyEvent("reanalysis_started", {
+      inconsistency_id: checkedId,
+      inconsistency_type: "character_continuity",
+      reanalysis_attempt_id: reanalysisAttemptId,
+      source: reanalysisSource,
+      change_count: decisionId ? 1 : 0,
+    });
     const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
       checkedInconsistency.evidence.length;
     setIncrementalRecheckActive(true);
@@ -4792,6 +4850,9 @@ function deserialize(
       const refreshed = updatedCharacterInconsistencies.find((item) =>
         isSameCharacterInconsistency(item, checkedInconsistency)
       );
+      reanalysisOutcome = refreshed ? "inconsistent" : "resolved";
+      reanalysisResultMessage = refreshed?.message ?? null;
+      returnedEvidenceCount = refreshed?.evidence.length ?? 0;
       const retainedCharacterInconsistencies = characterInconsistencies.map((existing) => {
         if (getStableCharacterInconsistencyId(existing) !== checkedId) return existing;
         const matched = refreshed;
@@ -4905,6 +4966,9 @@ function deserialize(
       setJitterSuppressedIds(new Set());
     } catch (error) {
       console.error(error);
+      reanalysisErrorMessage = error instanceof Error
+        ? error.message
+        : "Unknown error during character re-evaluation.";
       if (isAIRateLimitError(error)) {
         await new Promise<void>((resolve) => {
           window.setTimeout(resolve, RATE_LIMIT_FALLBACK_DELAY_MS);
@@ -4963,6 +5027,18 @@ function deserialize(
         });
       }
     } finally {
+      logStudyEvent("reanalysis_finished", {
+        inconsistency_id: checkedId,
+        inconsistency_type: "character_continuity",
+        reanalysis_attempt_id: reanalysisAttemptId,
+        source: reanalysisSource,
+        outcome: reanalysisOutcome,
+        duration_ms: Math.round(performance.now() - reanalysisStartedAt),
+        change_count: decisionId ? 1 : 0,
+        returned_evidence_count: returnedEvidenceCount,
+        result_message: reanalysisResultMessage?.slice(0, 1000) ?? null,
+        error_message: reanalysisErrorMessage?.slice(0, 1000) ?? null,
+      });
       setAnalyzing(false);
       setIncrementalRecheckActive(false);
       setIncrementalRecheckRanges([]);
@@ -4977,6 +5053,7 @@ function deserialize(
   function navigateToTextHighlight(highlight: NavigationTextHighlight) {
     const inconsistencyId = navigationItems[highlight.index]?.id;
     if (!inconsistencyId) return;
+    startInconsistencyWork(inconsistencyId, "left_navigation");
     logStudyEvent("navigation_marker_clicked", {
       inconsistency_id: inconsistencyId,
       page: highlight.page,
@@ -6358,11 +6435,11 @@ function deserialize(
         marker.dataset.conflictInconsistencyIds ?? marker.dataset.inconsistencyIds ?? ""
       ).split(" ").find(Boolean);
       if (!inconsistencyId) return;
+      startInconsistencyWork(inconsistencyId, "editor_marker");
       logStudyEvent("editor_marker_clicked", {
         inconsistency_id: inconsistencyId,
         role: marker.dataset.inconsistencyRole ?? "unknown",
       });
-      startInconsistencyWork(inconsistencyId, "editor_marker");
     }
   }
 
@@ -6815,7 +6892,7 @@ function deserialize(
             <div className="offscreen-inconsistency-markers offscreen-inconsistency-markers--above">
               {offscreenAbove.map((marker) => (
                 <OffscreenMarker
-                  key={marker.index}
+                  key={marker.inconsistencyId}
                   direction="above"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
@@ -6837,7 +6914,7 @@ function deserialize(
             <div className="offscreen-inconsistency-markers offscreen-inconsistency-markers--below">
               {offscreenBelow.map((marker) => (
                 <OffscreenMarker
-                  key={marker.index}
+                  key={marker.inconsistencyId}
                   direction="below"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
@@ -7476,7 +7553,7 @@ function OffscreenMarker({
 }) {
   const markerSize = Math.max(32, marker.occurrenceCount * 16 + 8);
   const hoverStartedAtRef = useRef<number | null>(null);
-  const markerHistoryKey = `${direction}:${marker.index}`;
+  const markerHistoryKey = `${direction}:${marker.inconsistencyId}`;
   const [displayedMarkerSize, setDisplayedMarkerSize] = useState(() => {
     const previous = offscreenMarkerSizeHistory.get(markerHistoryKey);
     return previous && performance.now() - previous.updatedAt < 2000
@@ -7542,6 +7619,20 @@ function OffscreenMarker({
     : `${marker.occurrenceCount} ${countStatus} ${marker.occurrenceCount === 1 ? "passage" : "passages"}`;
   const severityLabel = `Severity: ${marker.severity.toUpperCase()}`;
   const label = `${marker.label}: ${marker.detail}, ${severityLabel}, ${passageStatus}, ${direction === "above" ? "above" : "below"} the visible editor area`;
+  const finishHover = () => {
+    if (hoverStartedAtRef.current === null) return;
+    const durationMs = Math.round(performance.now() - hoverStartedAtRef.current);
+    hoverStartedAtRef.current = null;
+    if (durationMs < MIN_STUDY_HOVER_DURATION_MS) return;
+    logStudyEvent("location_marker_hovered", {
+      inconsistency_id: marker.inconsistencyId,
+      direction,
+      severity: marker.severity,
+      passage_count: marker.occurrenceCount,
+      successful: marker.successful,
+      duration_ms: durationMs,
+    });
+  };
 
   return (
     <button
@@ -7561,21 +7652,10 @@ function OffscreenMarker({
       onPointerEnter={() => {
         hoverStartedAtRef.current = performance.now();
       }}
-      onPointerLeave={() => {
-        if (hoverStartedAtRef.current === null) return;
-        const durationMs = Math.round(performance.now() - hoverStartedAtRef.current);
-        hoverStartedAtRef.current = null;
-        if (durationMs < MIN_STUDY_HOVER_DURATION_MS) return;
-        logStudyEvent("location_marker_hovered", {
-          inconsistency_id: marker.inconsistencyId,
-          direction,
-          severity: marker.severity,
-          passage_count: marker.occurrenceCount,
-          successful: marker.successful,
-          duration_ms: durationMs,
-        });
-      }}
+      onPointerLeave={finishHover}
       onClick={() => {
+        finishHover();
+        startInconsistencyWork(marker.inconsistencyId, "location_marker");
         logStudyEvent("location_marker_clicked", {
           inconsistency_id: marker.inconsistencyId,
           direction,
@@ -7591,7 +7671,6 @@ function OffscreenMarker({
           selected_before_click: selected,
           selected_after_click: true,
         });
-        startInconsistencyWork(marker.inconsistencyId, "location_marker");
         onClick();
       }}
       aria-pressed={selected}

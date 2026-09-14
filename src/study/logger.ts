@@ -112,6 +112,7 @@ export function logStudyEvent(
     payload.inconsistency_id === activeWork.inconsistencyId &&
     eventType !== "inconsistency_work_started" &&
     eventType !== "inconsistency_work_finished" &&
+    eventType !== "inconsistency_selected" &&
     eventType !== "location_marker_created" &&
     eventType !== "location_marker_size_changed"
   ) {
