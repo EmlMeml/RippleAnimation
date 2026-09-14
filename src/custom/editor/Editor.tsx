@@ -2847,6 +2847,11 @@ function deserialize(
 
   async function handleAnalyze() {
     passageAnchors.clear();
+    // Unmount the markers before resetting their per-analysis logging state.
+    // Otherwise the loading-state render can report the still-visible markers
+    // from the previous analysis as newly created.
+    setOffscreenAbove([]);
+    setOffscreenBelow([]);
     locationMarkerLoggedSizesRef.current.clear();
     const analysisStartedAt = performance.now();
     let analysisOutcome = "completed";
@@ -6814,6 +6819,7 @@ function deserialize(
                   direction="above"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  loggingEnabled={!analyzing}
                   loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
                     focusOffscreenInconsistency(
@@ -6835,6 +6841,7 @@ function deserialize(
                   direction="below"
                   marker={marker}
                   selected={navigationItems[marker.index]?.id === selectedInconsistencyId}
+                  loggingEnabled={!analyzing}
                   loggedSizes={locationMarkerLoggedSizesRef.current}
                   onClick={() => {
                     focusOffscreenInconsistency(
@@ -7456,12 +7463,14 @@ function OffscreenMarker({
   direction,
   marker,
   selected,
+  loggingEnabled,
   loggedSizes,
   onClick,
 }: {
   direction: "above" | "below";
   marker: OffscreenInconsistency;
   selected: boolean;
+  loggingEnabled: boolean;
   loggedSizes: Map<string, number>;
   onClick: () => void;
 }) {
@@ -7487,6 +7496,7 @@ function OffscreenMarker({
   }, [markerHistoryKey, markerSize]);
 
   useEffect(() => {
+    if (!loggingEnabled) return;
     const loggingKey = `${marker.inconsistencyId}:${direction}`;
     const previousSize = loggedSizes.get(loggingKey);
     if (previousSize === undefined) {
@@ -7522,7 +7532,7 @@ function OffscreenMarker({
       size_change: markerSize > previousSize ? "increased" : "decreased",
       selected,
     });
-  }, [direction, loggedSizes, marker, markerSize, selected]);
+  }, [direction, loggedSizes, loggingEnabled, marker, markerSize, selected]);
 
   if (marker.occurrenceCount <= 0) return null;
 
@@ -7578,7 +7588,8 @@ function OffscreenMarker({
           opacity: Number(marker.opacity.toFixed(3)),
           edge_offset_px: Math.round(marker.edgeOffset),
           marker_size_px: displayedMarkerSize,
-          selected,
+          selected_before_click: selected,
+          selected_after_click: true,
         });
         startInconsistencyWork(marker.inconsistencyId, "location_marker");
         onClick();
