@@ -1,6 +1,6 @@
 import type { Fact, FactExtraction } from "../types/facts";
 import type { StoryContext } from "../types/story";
-import { askAI } from "./../ai/api";
+import { askAI, isAIRateLimitError } from "./../ai/api";
 import { normalizeTemporal } from "./temporalNormalizer";
 import { resolvePronouns } from "./pronounResolver";
 import { addMissingExplicitAgeFacts } from "./explicitAgeFacts";
@@ -196,6 +196,9 @@ async function extractChunkWithRetry(
       return await askAI(createExtractionPrompt(chunk, context));
     } catch (error) {
       lastError = error;
+      // A depleted provider quota cannot recover through immediate retries.
+      // Preserve the 429 for the editor's prototype fallback instead.
+      if (isAIRateLimitError(error)) throw error;
       console.warn(
         `Fact extraction failed for chunk ${chunkIndex + 1}, ` +
         `attempt ${attempt + 1}:`,

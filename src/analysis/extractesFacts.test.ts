@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractFacts } from "./extractesFacts";
-import { askAI } from "./../ai/api";
+import { AIRateLimitError, askAI } from "./../ai/api";
 import type { FactExtraction } from "../types/facts";
 import { checkConsistency } from "../ai/consistencyChecker";
 import { EXAMPLE_TEXT } from "../custom/editor/exampleText";
 
-vi.mock("./../ai/api", () => ({
+vi.mock("./../ai/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./../ai/api")>(),
   askAI: vi.fn(),
 }));
 
@@ -43,6 +44,13 @@ describe("extractFacts", () => {
 
     await expect(extractFacts(text, context)).resolves.toEqual(extraction);
     expect(askAI).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries an exhausted provider quota neither for this chunk nor for later chunks", async () => {
+    vi.mocked(askAI).mockReset().mockRejectedValue(new AIRateLimitError("Provider code 429"));
+    await expect(extractFacts("Alice is 32 years old.", context))
+      .rejects.toBeInstanceOf(AIRateLimitError);
+    expect(askAI).toHaveBeenCalledTimes(1);
   });
 
   it("übernimmt zeitlichen Kontext aus der AI-Antwort", async () => {
