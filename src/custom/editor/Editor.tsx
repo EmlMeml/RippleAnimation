@@ -433,6 +433,7 @@ export default function RichTextEditor({context,}: {context: StoryContext}) {
     locallyRemainingCount?: number;
     decisionId?: string;
     evidenceIndices?: number[];
+    textChangeCount?: number;
   } | null>(null);
   const [inconsistentPaths, setInconsistentPaths] = useState<InconsistentPath[]>([]);
   const [inconsistentRanges, setInconsistentRanges] = useState<InconsistentTextRange[]>([]);
@@ -4830,7 +4831,8 @@ function deserialize(
     locallyRemainingCount?: number,
     markerRanges: BaseRange[] = rememberedRanges,
     decisionId?: string,
-    evidenceIndices: number[] = []
+    evidenceIndices: number[] = [],
+    textChangeCount = decisionId ? 1 : 0
   ) {
     const checkedId = getStableCharacterInconsistencyId(checkedInconsistency);
     const reanalysisAttemptId = crypto.randomUUID();
@@ -4845,7 +4847,7 @@ function deserialize(
       inconsistency_type: "character_continuity",
       reanalysis_attempt_id: reanalysisAttemptId,
       source: reanalysisSource,
-      change_count: decisionId ? 1 : 0,
+      change_count: textChangeCount,
     });
     const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
       checkedInconsistency.evidence.length;
@@ -5037,6 +5039,7 @@ function deserialize(
           locallyRemainingCount,
           decisionId,
           evidenceIndices,
+          textChangeCount,
         });
         setCharacterAnalysisError(
           "The AI provider is temporarily unavailable. Your change and the open inconsistency have been preserved. Please retry the evaluation."
@@ -5054,7 +5057,7 @@ function deserialize(
         source: reanalysisSource,
         outcome: reanalysisOutcome,
         duration_ms: Math.round(performance.now() - reanalysisStartedAt),
-        change_count: decisionId ? 1 : 0,
+        change_count: textChangeCount,
         returned_evidence_count: returnedEvidenceCount,
         result_message: reanalysisResultMessage?.slice(0, 1000) ?? null,
         error_message: reanalysisErrorMessage?.slice(0, 1000) ?? null,
@@ -5469,6 +5472,7 @@ function deserialize(
           change_types: studyDiffs.map((diff) => diff.type),
           removed_texts: studyDiffs.map((diff) => diff.removed),
           added_texts: studyDiffs.map((diff) => diff.added),
+          text_changed: studyDiffs.length > 0,
         });
       }
     } finally {
@@ -5746,7 +5750,8 @@ function deserialize(
             : 0,
           markerRanges.length > 0 ? markerRanges : rememberedRanges,
           decisionId,
-          freeEditCharacterEvidenceIndices
+          freeEditCharacterEvidenceIndices,
+          decisionDiffs.length
         );
       }
       return;
@@ -7230,7 +7235,8 @@ function deserialize(
                   characterReevaluationRetry.locallyRemainingCount,
                   characterReevaluationRetry.markerRanges,
                   characterReevaluationRetry.decisionId,
-                  characterReevaluationRetry.evidenceIndices
+                  characterReevaluationRetry.evidenceIndices,
+                  characterReevaluationRetry.textChangeCount
                 )}
                 disabled={analyzing}
               >
