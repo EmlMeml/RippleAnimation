@@ -34,6 +34,7 @@ import { captureDirectPassageEdit } from "./directPassageEdit";
 import { reconcileReevaluation } from "./reconcileReevaluation";
 import { reconcileConsistencyCategories } from "../../ai/reconcileConsistencyCategories";
 import { recheckStoryPassages } from "../../ai/recheckStoryPassages";
+import { isAIRateLimitError } from "../../ai/api";
 import {
   checkConsistency,
   type Inconsistency,
@@ -218,14 +219,6 @@ let nextStableCharacterInconsistencyId = 0;
  */
 const ENABLE_AI_CHANGE_ACCEPT_CHECK = true;
 const MIN_STUDY_HOVER_DURATION_MS = 300;
-const RATE_LIMIT_FALLBACK_DELAY_MS = 3_000;
-
-function isAIRateLimitError(error: unknown): boolean {
-  if (typeof error === "object" && error !== null && "status" in error) {
-    return (error as { status?: unknown }).status === 429;
-  }
-  return error instanceof Error && /(?:\b429\b|too many requests|rate.?limit)/i.test(error.message);
-}
 
 function getStableInconsistencyId(inconsistency: Inconsistency): string {
   const existingId = stableInconsistencyIds.get(inconsistency);
@@ -4393,9 +4386,29 @@ function deserialize(
       setDocument([...editor.children]);
     } catch (error) {
       reanalysisErrorMessage = error instanceof Error ? error.message : "The passage could not be checked.";
-      setDirectEditRecords((current) => current.map((record) => recordIds.has(record.id) ? { ...record, status: "error" } : record));
-      setPassageRecheckErrors((current) => new Map(current).set(issueId,
-        error instanceof Error ? error.message : "The passage could not be checked. Please retry."));
+      if (isAIRateLimitError(error)) {
+        reanalysisOutcome = "assumed_correct_quota";
+        reanalysisResultMessage = "Prototype fallback: the change was accepted without AI verification because the free-token limit was reached.";
+        setDirectEditRecords((current) => current.map((record) => recordIds.has(record.id)
+          ? { ...record, status: "resolved" } : record));
+        saved.forEach((entry) => {
+          entry.original = entry.range ? Editor.string(editor, entry.range) : "";
+          entry.originalContext = entry.contextRange ? Editor.string(editor, entry.contextRange) : undefined;
+        });
+        setPassageResolvedIds((current) => new Set([...current, issueId]));
+        if (!factual) setHandledCharacterEvidenceKeys((current) => new Set([
+          ...current, ...target.evidence.map((_, index) => `${issueId}:${index}`),
+        ]));
+        setSuccessfulInconsistencyId(issueId);
+        successfulInconsistencyIdRef.current = issueId;
+        publishVerifiedMarkerResult(issueId, saved.length, 0);
+        setInconsistentRanges((current) => removeInconsistencyFromRanges(current, issueId));
+        setDocument([...editor.children]);
+      } else {
+        setDirectEditRecords((current) => current.map((record) => recordIds.has(record.id) ? { ...record, status: "error" } : record));
+        setPassageRecheckErrors((current) => new Map(current).set(issueId,
+          error instanceof Error ? error.message : "The passage could not be checked. Please retry."));
+      }
     } finally {
       logStudyEvent("reanalysis_finished", {
         inconsistency_id: issueId,
@@ -4743,15 +4756,14 @@ function deserialize(
         ? error.message
         : "Unknown error during incremental analysis.";
       if (checkedInconsistency && isAIRateLimitError(error)) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, RATE_LIMIT_FALLBACK_DELAY_MS);
-        });
         const checkedId = getStableInconsistencyId(checkedInconsistency);
         const remainingCount = getAffectedFactPositions(checkedInconsistency).length;
-        const previousCount = verifiedMarkerResults.get(checkedId)?.occurrenceCount ??
-          remainingCount + (rememberedRanges.length > 0 ? 1 : 0);
-        publishVerifiedMarkerResult(checkedId, previousCount, remainingCount);
-
+        publishVerifiedMarkerResult(
+          checkedId,
+          verifiedMarkerResults.get(checkedId)?.occurrenceCount ?? remainingCount +
+            (rememberedRanges.length > 0 ? 1 : 0),
+          remainingCount
+        );
         if (remainingCount === 0) {
           const successfulRanges: InconsistentTextRange[] = rememberedRanges.map((range) => ({
             ...range,
@@ -4768,8 +4780,7 @@ function deserialize(
           ));
           successfulRangesRef.current = successfulRanges;
           successfulMarkerRangesRef.current = rememberedRanges.length > 0
-            ? rememberedRanges
-            : successfulRanges;
+            ? rememberedRanges : successfulRanges;
           setInconsistentRanges((current) => [
             ...removeInconsistencyFromRanges(current, checkedId),
             ...successfulRanges,
@@ -4778,9 +4789,10 @@ function deserialize(
           setSuccessfulInconsistencyId(null);
           successfulInconsistencyIdRef.current = null;
           setPendingResolvedInconsistencies(null);
-          successfulRangesRef.current = [];
-          successfulMarkerRangesRef.current = [];
         }
+        reanalysisOutcome = "assumed_correct_quota";
+        reanalysisResultMessage = "Prototype fallback: the change was accepted without AI verification because the free-token limit was reached.";
+        setAnalysisError("");
         setActiveInconsistencyId(checkedId);
         setSelectedInconsistencyId(checkedId);
         selectedInconsistencyIdRef.current = checkedId;
@@ -4970,11 +4982,18 @@ function deserialize(
         ? error.message
         : "Unknown error during character re-evaluation.";
       if (isAIRateLimitError(error)) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, RATE_LIMIT_FALLBACK_DELAY_MS);
-        });
+        if (decisionId) {
+          setCharacterDecisions((decisions) => decisions.map((decision) =>
+            decision.id === decisionId ? { ...decision, status: "valid" } : decision
+          ));
+          setHandledCharacterEvidenceKeys((current) => new Set([
+            ...current,
+            ...evidenceIndices.map((index) => `${checkedId}:${index}`),
+          ]));
+        }
         const remainingCount = locallyRemainingCount ?? checkedInconsistency.evidence.filter(
-          (_, evidenceIndex) => !handledCharacterEvidenceKeys.has(`${checkedId}:${evidenceIndex}`)
+          (_, evidenceIndex) => !handledCharacterEvidenceKeys.has(`${checkedId}:${evidenceIndex}`) &&
+            !evidenceIndices.includes(evidenceIndex)
         ).length;
         publishVerifiedMarkerResult(checkedId, previousCount, remainingCount);
         if (remainingCount === 0) {
@@ -4993,8 +5012,7 @@ function deserialize(
           ));
           successfulRangesRef.current = successfulRanges;
           successfulMarkerRangesRef.current = markerRanges.length > 0
-            ? markerRanges
-            : rememberedRanges;
+            ? markerRanges : rememberedRanges;
           setInconsistentRanges((current) => [
             ...removeInconsistencyFromRanges(current, checkedId),
             ...successfulRanges,
@@ -5003,9 +5021,11 @@ function deserialize(
           setSuccessfulInconsistencyId(null);
           successfulInconsistencyIdRef.current = null;
           setPendingResolvedCharacterInconsistencies(null);
-          successfulRangesRef.current = [];
-          successfulMarkerRangesRef.current = [];
         }
+        reanalysisOutcome = "assumed_correct_quota";
+        reanalysisResultMessage = "Prototype fallback: the change was accepted without AI verification because the free-token limit was reached.";
+        setCharacterReevaluationRetry(null);
+        setCharacterAnalysisError("");
         setActiveInconsistencyId(checkedId);
         setSelectedInconsistencyId(checkedId);
         selectedInconsistencyIdRef.current = checkedId;

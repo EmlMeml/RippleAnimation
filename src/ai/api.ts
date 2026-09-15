@@ -16,6 +16,45 @@ interface StructuredAIResponse<T> {
 
 interface StructuredAIErrorResponse {
   raw?: unknown;
+  code?: unknown;
+  error?: { code?: unknown; message?: unknown } | string;
+  details?: { code?: unknown; error?: { code?: unknown; message?: unknown } };
+}
+
+export class AIRateLimitError extends Error {
+  readonly status = 429;
+  constructor(message: string) {
+    super(message);
+    this.name = "AIRateLimitError";
+  }
+}
+
+export function isAIRateLimitError(error: unknown): boolean {
+  if (error instanceof AIRateLimitError) return true;
+  if (typeof error === "object" && error !== null && "status" in error &&
+      (error as { status?: unknown }).status === 429) return true;
+  return error instanceof Error && /(?:\b429\b|too many requests|rate.?limit|quota exceeded|free tier.*limit)/i.test(error.message);
+}
+
+function isRateLimitedResponse(status: number, responseText: string, data?: StructuredAIErrorResponse): boolean {
+  const providerCodes = [
+    data?.code,
+    data?.details?.code,
+    data?.details?.error?.code,
+    typeof data?.error === "object" ? data.error.code : undefined,
+  ];
+  return status === 429 || providerCodes.some((code) => code === 429 || code === "429") ||
+    /(?:too many requests|rate.?limit(?: exceeded)?|quota exceeded|free tier.*limit)/i.test(responseText);
+}
+
+function parseAIErrorResponse(responseText: string): StructuredAIErrorResponse | undefined {
+  try {
+    const parsed: unknown = JSON.parse(responseText);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as StructuredAIErrorResponse : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isLegacyFactExtraction(value: unknown): boolean {
@@ -50,13 +89,11 @@ export async function askAIStructured<T>(
        * types it returns the parsed model output as `raw` in a 502 response.
        * Accept that value only when this caller's validator confirms it.
        */
-      let errorData: StructuredAIErrorResponse | undefined;
-      try {
-        errorData = JSON.parse(responseText) as StructuredAIErrorResponse;
-      } catch {
-        // The regular request error below contains the original response text.
-      }
+      const errorData = parseAIErrorResponse(responseText);
       const rawResponse = errorData?.raw;
+      if (isRateLimitedResponse(response.status, responseText, errorData)) {
+        throw new AIRateLimitError(`AI rate limit reached: ${response.status} ${responseText}`);
+      }
       if (validate(rawResponse)) return rawResponse;
       if (isLegacyFactExtraction(rawResponse)) {
         throw new Error(
@@ -131,6 +168,9 @@ export async function askAI(
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (isRateLimitedResponse(response.status, errorText, parseAIErrorResponse(errorText))) {
+        throw new AIRateLimitError(`AI rate limit reached: ${response.status} ${errorText}`);
+      }
       throw new Error(
         `AI request failed: ${response.status} ${errorText}`
       );

@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AIRateLimitError } from "./api";
 import {
+  checkCharacterConsistency,
   checkExplicitCharacterContradictions,
   isCharacterConsistencyResponse,
   mergeCharacterInconsistencies,
@@ -9,6 +11,19 @@ import {
   preserveTargetForDependentMemoryClaim,
   hasExplicitlyNegatedTargetMemoryClaim,
 } from "./characterConsistencyChecker";
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("does not turn an exhausted AI quota into a successful targeted character check", async () => {
+  vi.stubGlobal("window", { setTimeout, clearTimeout });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+    JSON.stringify({ error: "Rate limit exceeded" }), { status: 429 }
+  )));
+  const text = "Alice never trusted Bob.\nAlice always trusted Bob.";
+  const [target] = checkExplicitCharacterContradictions(text);
+  expect(target).toBeDefined();
+  await expect(checkCharacterConsistency(text, target)).rejects.toBeInstanceOf(AIRateLimitError);
+});
 
 describe("isCharacterConsistencyResponse", () => {
   it("accepts a valid result", () => {

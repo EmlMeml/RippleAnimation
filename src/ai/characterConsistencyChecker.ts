@@ -1,4 +1,4 @@
-import { askAIStructured } from "./api";
+import { askAIStructured, isAIRateLimitError } from "./api";
 
 export type CharacterConsistencyCategory =
   | "knowledge"
@@ -351,6 +351,13 @@ ${numberedText}`;
   const successful = attempts.flatMap((attempt) =>
     attempt.status === "fulfilled" ? attempt.value.inconsistencies : []
   );
+
+  if (attempts.every((attempt) => attempt.status === "rejected")) {
+    const rateLimitFailure = attempts.find((attempt) =>
+      attempt.status === "rejected" && isAIRateLimitError(attempt.reason)
+    );
+    if (rateLimitFailure?.status === "rejected") throw rateLimitFailure.reason;
+  }
 
   if (attempts.every((attempt) => attempt.status === "rejected") && deterministic.length === 0) {
     throw attempts[0].status === "rejected"
