@@ -6959,9 +6959,9 @@ function deserialize(
           )}
         </div>
         <div className="page-controls" aria-label="Seitennavigation">
-          <button type="button" onClick={() => navigateToPage(currentPage - 1, "page_controls")} disabled={currentPage === 0}>← Zurück</button>
-          <span>Seite {currentPage + 1} von {pageCount}</span>
-          <button type="button" onClick={() => navigateToPage(currentPage + 1, "page_controls")} disabled={currentPage >= pageCount - 1}>Weiter →</button>
+          <button type="button" onClick={() => navigateToPage(currentPage - 1, "page_controls")} disabled={currentPage === 0}>← Back</button>
+          <span>Page {currentPage + 1} of {pageCount}</span>
+          <button type="button" onClick={() => navigateToPage(currentPage + 1, "page_controls")} disabled={currentPage >= pageCount - 1}>Next →</button>
         </div>
         
       </Slate>
@@ -7112,7 +7112,7 @@ function deserialize(
                       Looks good
                     </button>
                     {position.textChanged && <div className="passage-change-notice passage-review-actions">
-                      <span className="passage-change-status">{position.textDeleted ? "Textstelle gelöscht" : "Text geändert"}</span>
+                      <span className="passage-change-status">{position.textDeleted ? "Deleted Text" : "Text changed"}</span>
                       <button type="button" className="conflict-card-position-edit" disabled={analyzing}
                         title="Check this inconsistency using its current passages and counterparts"
                         onClick={() => reanalyzeChangedPassage(inconsistency)}>{isReevaluating ? "Checking…" : "Reanalyze"}</button>
@@ -7354,7 +7354,7 @@ function deserialize(
                       Looks good
                     </button>
                     {passageState?.changed && <div className="passage-change-notice passage-review-actions">
-                      <span className="passage-change-status">{passageState.deleted ? "Textstelle gelöscht" : "Text geändert"}</span>
+                      <span className="passage-change-status">{passageState.deleted ? "Deleted Text" : "Text changed"}</span>
                       <button type="button" className="conflict-card-position-edit" disabled={analyzing}
                         title="Check this inconsistency using its current passages and counterparts"
                         onClick={() => reanalyzeChangedPassage(issue)}>{isReevaluating ? "Checking…" : "Reanalyze"}</button>
