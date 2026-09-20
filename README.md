@@ -1,77 +1,57 @@
-# React + TypeScript + Vite
+# RippleAnimation
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+RippleAnimation is a React prototype for inspecting and revising narrative inconsistencies. It connects detected issues with the affected text passages through cards, highlights, context previews, markers, and animations.
 
-Currently, two official plugins are available:
+## Requirements
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- [Node.js 22](https://nodejs.org/) or newer
+- npm, included with Node.js
+- An internet connection for live AI analysis
 
-## React Compiler
+## Run locally
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+1. Clone or download the repository and open a terminal in the project folder.
+2. Install the dependencies:
 
-Note: This will impact Vite dev & build performances.
+   ```bash
+   npm ci
+   ```
 
-## Expanding the ESLint configuration
+3. Create a `.env.local` file with the following content:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+   ```env
+   VITE_BASE_PATH=/
+   ```
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+4. Start the development server:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+   ```bash
+   npm run dev
+   ```
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+5. Open the local address shown in the terminal, normally <http://localhost:5173/>.
 
+The application sends analysis requests to the AI worker configured in `src/ai/api.ts`. No local AI model or API key is required for the current configuration.
+
+## Optional study logging
+
+Study-event logging uses Supabase. To enable it, add the following values to `.env.local`:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Without these values, the interface still runs, but study events are not uploaded to Supabase. See `.env.example` for all supported environment variables.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Useful commands
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm run dev       # Start the development server
+npm run test:run  # Run the test suite once
+npm run lint      # Check the source code
+npm run build     # Create a production build in dist/
+npm run preview   # Preview the production build locally
 ```
+
+For a local production preview, keep `VITE_BASE_PATH=/` in `.env.local`, then run `npm run build` followed by `npm run preview`.
